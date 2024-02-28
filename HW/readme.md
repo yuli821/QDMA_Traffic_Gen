@@ -1,1 +1,1 @@
-Xilinx QDMA Streaming example user logic
+Xilinx QDMA Streaming example user logic. traggic_gen.sv is my testing code.
