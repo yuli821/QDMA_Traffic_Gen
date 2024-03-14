@@ -19,7 +19,7 @@ logic [len-1:0] rx_data;
 logic rx_last;
 
 
-traffic_gen #(.RX_LEN(len)) dut(
+traffic_gen #(.RX_LEN(len), .FLOW_SPEED(1000000000)) dut(
     .user_clk(clk),
     .user_resetn(resetn),
     .control_reg(ctrlreg),
