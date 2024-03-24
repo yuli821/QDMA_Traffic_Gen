@@ -1,160 +1,249 @@
 `timescale 1ps / 1ps
 module traffic_gen #(
-    parameter FLOW_SPEED = 10000000, //10Mbps
     parameter MAX_ETH_FRAME = 1518, //bytes
-    parameter RX_LEN = 128, //data width
+    parameter RX_LEN = 512, //data width
     parameter RX_BEN = RX_LEN/8,
-    parameter DST_MAC = 48'h800000000000,
-    parameter SRC_MAC = 48'h800000000001
+    parameter TM_DSC_BITS = 16,
+    parameter FLOW_SPEED = 10000000//1Mbps
 )
 (
-    input logic user_clk,
-    input logic user_resetn,
+    input logic axi_aclk,
+    input logic axi_aresetn,
     input logic [31:0] control_reg,
-    output logic error,
+    input logic [15:0] txr_size,
+    input logic [10:0] num_pkt,
+    input logic [TM_DSC_BITS-1:0] credit_in,
+    input logic credit_updt,
+    input logic [TM_DSC_BITS-1:0] credit_perpkt_in,
+    input logic [TM_DSC_BITS-1:0] credit_needed,
+    input logic rx_ready,
+    input logic [31:0] flow_speed,
     output logic rx_valid,
     output logic [RX_BEN-1:0]  rx_ben,
     output logic [RX_LEN-1:0] rx_data, //1 byte
-    output logic rx_last
+    output logic rx_last,
+    output logic rx_end
 );
-localparam CYCLES_PER_SEC = 250000000; //clock speed (250Mhz), 4ns per cycle
+localparam [31:0] cycles_per_second = 250000000;
 localparam BYTES_PER_BEAT = RX_LEN/8;
-localparam CYCLES_PER_FRAME =  $ceil((8.0 * MAX_ETH_FRAME * CYCLES_PER_SEC / FLOW_SPEED)); 
-localparam CYCLES_NEEDED = $ceil((8.0 * MAX_ETH_FRAME) / RX_LEN);
+localparam DST_MAC = 48'h43414d545344;
+localparam SRC_MAC = 48'h43414d435253;
+localparam TCQ = 1;
+
+// logic [31:0] flow_speed [4] = '{1000000, 10000000, 100000000, 1000000000};//1Mbps, 10Mbps, 100mbps, 1Gbps ;
+logic [15:0] frame_size, tot_pkt_size, counter_trans, curr_pkt_size;
+logic [31:0] cycles_per_pkt;
+// assign frame_size = (txr_size > MAX_ETH_FRAME) ? MAX_ETH_FRAME : txr_size;
+assign cycles_per_pkt = txr_size * ( (cycles_per_second << 3) / FLOW_SPEED);
+
 logic is_header;
 logic [31:0] crc;
 logic [111:0] header_buf;
 logic [RX_LEN-1:0] data_buf;
-logic start_c2h;
+logic control_reg_1_d, start_c2h, start_c2h_d1, start_c2h_d2, ready;
+// logic [13:0] max_count, t_max_count;
+logic [TM_DSC_BITS-1:0] credit_used_perpkt, tcredit_used, credit_in_sync;
+logic lst_credit_pkt;
+logic [10:0] pkt_count;
+// logic [12:0] count;
+// int count_pkt_drop;
 
-logic [31:0] counter_trans;
-logic [31:0] counter_wait;
+int counter_wait;
+assign header_buf = {DST_MAC, SRC_MAC, 16'h2121}; //omit the length
+assign crc = 32'h0a212121;
+assign rx_end = (~rx_valid) & (num_pkt == pkt_count);
+assign lst_credit_pkt = (credit_perpkt_in - credit_used_perpkt) == 1;
 
-assign header_buf = {DST_MAC, SRC_MAC, 16'hff}; //omit the length
-assign crc = 32'hffffffff;
-assign error = (CYCLES_NEEDED > CYCLES_PER_FRAME) ? 1'b1 : 1'b0; //too slow
+enum logic [1:0] {IDLE, TRANSFER, WAIT_FRAME, WAIT} curr_state;
 
-enum logic [2:0] {IDLE, TRANSFER, WAIT} curr_state, next_state;
+//output signal
+always_ff @(posedge axi_aclk) begin 
+    control_reg_1_d <= control_reg[1];
+    //max txr_size is 4kb, if pkt size is larger, more than one credit is needed.
+    tot_pkt_size <= txr_size;
+    // t_max_count <= ((txr_size%(RX_LEN/8) > 0) || txr_size == 0 ) ? (txr_size)/(RX_LEN/8) +1 : (txr_size)/(RX_LEN/8); //number of cycles needed to transfer a whole pkt
+end
 
-// assign c2h_dpar = ~dpar_val;
-// always_comb begin
-//     for (integer i=0; i < BYTES_PER_BEAT; i += 1) begin
-// 	    rx_ben[i] = ^rx_data[i*8 +: 8];
+always_ff @(posedge axi_aclk) begin 
+    start_c2h_d1 <= start_c2h;
+    start_c2h_d2 <= start_c2h_d1;
+end
+
+// always_ff @(posedge axi_aclk) begin 
+//     if(~axi_aresetn | ~start_c2h | (curr_state == WAIT)) begin 
+//         for (integer j=0; j<BYTES_PER_BEAT; j++)
+//             data_buf[j*8 +: 8] <= j[7:0];
+//     end
+//     else if (rx_valid & (~is_header)) begin 
+//         for (integer j=0; j<BYTES_PER_BEAT; j++)
+//             data_buf[j*8 +: 8] <= data_buf[j*8 +: 8] + BYTES_PER_BEAT;
 //     end
 // end
-//output signal
-always_ff @(posedge user_clk) begin 
-    if(~user_resetn | ~start_c2h | (curr_state == WAIT)) begin 
-        for (integer j=0; j<BYTES_PER_BEAT; j++)
-            data_buf[j*8 +: 8] <= j[7:0];
-    end
-    else if (rx_valid & (~is_header)) begin 
-        for (integer j=0; j<BYTES_PER_BEAT; j++)
-            data_buf[j*8 +: 8] <= data_buf[j*8 +: 8] + BYTES_PER_BEAT;
-    end
+
+always_ff @(posedge axi_aclk) begin 
+    if (~axi_aresetn)
+        start_c2h <= 0;
+    else if (control_reg_1_d)
+        start_c2h <= 1;
+    else if (pkt_count >= num_pkt)
+        start_c2h <= 0;
 end
 
-always_comb begin 
-    rx_valid = 1'b0;
-    rx_data = RX_LEN'(0);
-    case (curr_state)
-        IDLE: begin 
-            rx_valid = 1'b0;
-            rx_data = RX_LEN'(0);
-        end
-        TRANSFER: begin 
-            rx_valid = 1'b1;
-            if (is_header) begin 
-                rx_data[RX_LEN-1:RX_LEN-112] = header_buf;
-                rx_ben = 16'hffff;
-                for (integer j = 0 ; j < BYTES_PER_BEAT-14; j++)
-                    rx_data[j*8 +: 8] = data_buf[j*8 +: 8];
-            end
-            else begin 
-                for (integer j = 0; j < BYTES_PER_BEAT; j++) begin
-                    if (((counter_trans + j) >= (MAX_ETH_FRAME - 4)) && ((counter_trans + j) < MAX_ETH_FRAME)) begin
-                        rx_data[j*8 +: 8] = crc[(counter_trans + j - MAX_ETH_FRAME + 4)*8 +: 8];
-                        rx_ben[j] = 1'b1;
-                    end 
-                    else if ((counter_trans + j) >= MAX_ETH_FRAME) begin 
-                        rx_data[j*8 +: 8] = 8'b0;
-                        rx_ben[j] = 1'b0;
-                    end else begin 
-                        rx_data[j*8 +: 8] = data_buf[j*8 +: 8] + (BYTES_PER_BEAT - 14);
-                        rx_ben[j] = 1'b1;
-                    end
-                end
-            end
-        end
-        WAIT: begin 
-            rx_valid = 1'b0;
-            rx_data = RX_LEN'(0);
-        end
-    endcase
-end
-//next_state logic
-always_comb begin 
-    case (curr_state)
-        IDLE: begin 
-            if (start_c2h)
-                next_state = TRANSFER;
+always @(posedge axi_aclk)
+    if (~axi_aresetn )
+        credit_in_sync <= 0;
+    else if (~start_c2h )
+        credit_in_sync <= 0;
+    else if (start_c2h & credit_updt)
+        credit_in_sync <= credit_in_sync + credit_in;
+
+// always_comb begin
+//     rx_data = RX_LEN'(0);
+//     case (curr_state)
+//         IDLE: begin 
+//             rx_data = RX_LEN'(0);
+//             rx_ben = RX_BEN'(0);
+//         end
+//         TRANSFER: begin 
+//             if (is_header) begin 
+//                 rx_data[111:0] = header_buf;
+//                 rx_ben = {RX_BEN{1'b1}};
+//                 for (integer j = 14 ; j < BYTES_PER_BEAT; j++)
+//                     rx_data[j*8 +: 8] = 8'h41;
+//                     // rx_data[j*8 +: 8] = data_buf[(j-14)*8 +: 8];
+//             end
+//             else begin 
+//                 for (integer j = 0; j < BYTES_PER_BEAT; j++) begin
+//                     if (((counter_trans + j) >= (frame_size - 4)) && ((counter_trans + j) < frame_size)) begin
+//                         rx_data[j*8 +: 8] = crc[(counter_trans + j - frame_size + 4)*8 +: 8];
+//                         rx_ben[j] = 1'b1;
+//                     end 
+//                     else if ((counter_trans + j) >= frame_size) begin 
+//                         rx_data[j*8 +: 8] = 8'b0;
+//                         rx_ben[j] = 1'b0;
+//                     end else begin 
+//                         // rx_data[j*8 +: 8] = data_buf[j*8 +: 8] + (BYTES_PER_BEAT - 14);
+//                         rx_data[j*8 +: 8] = 8'h41;
+//                         rx_ben[j] = 1'b1;
+//                     end
+//                 end
+//             end
+//         end
+//         WAIT: begin 
+//             rx_data = RX_LEN'(0);
+//             rx_ben = RX_BEN'(0);
+//         end
+//     endcase
+// end
+
+always_ff @(posedge axi_aclk) begin 
+    if (~axi_aresetn | ~start_c2h | rx_last) begin 
+        for (integer j = 0 ; j < BYTES_PER_BEAT ; j++) begin
+            if (j < 14) 
+                data_buf[8*j +: 8] <= #TCQ header_buf[8*j +: 8];
             else 
-                next_state = IDLE;
+                data_buf[8*j +: 8] <= #TCQ 8'h41;
+            
         end
-        TRANSFER: begin 
-            if ((counter_trans + BYTES_PER_BEAT) >= MAX_ETH_FRAME) next_state = WAIT;
-            else                                       next_state = TRANSFER;
+    end else if (rx_ready & rx_valid) begin 
+        for (integer j = 0 ; j < BYTES_PER_BEAT ; j++) begin 
+            if(((counter_trans + j) >= (frame_size - 4)) && ((counter_trans + j) < frame_size))
+                data_buf[8*j +: 8] <= #TCQ crc[(counter_trans + j - frame_size + 4) * 8 +: 8];
+            else 
+                data_buf[8*j +: 8] <= #TCQ 8'h41;
         end
-        WAIT: begin 
-            if (~start_c2h) begin 
-                next_state = IDLE;
-            end
-            else if (counter_wait < (CYCLES_PER_FRAME - CYCLES_NEEDED- 1)) begin 
-                next_state = WAIT;
-            end
-            else begin 
-                next_state = TRANSFER;
-            end
-        end
-        default: begin 
-            next_state = IDLE;
-        end
-    endcase
+    end
 end
+assign rx_data = data_buf;
 
-always_ff @(posedge user_clk) begin 
-    if (~user_resetn) begin 
+always_ff @(posedge axi_aclk) begin 
+    if (~axi_aresetn) begin 
         curr_state <= IDLE;
-        start_c2h <= 1'b0;
-        counter_trans <= 32'b0;
-        counter_wait <= 32'b0;
+        rx_valid <= 1'b0;
         rx_last <= 1'b0;
+        pkt_count <= 0;
+        credit_used_perpkt <= 0;
+        tcredit_used <= 0;
+        counter_wait <= 0;
+        counter_trans <= 0;
         is_header <= 1'b1;
+        frame_size <= 0;
+        curr_pkt_size <= 0;
     end else begin 
-        curr_state = next_state;
-        start_c2h <= control_reg[1];
         case(curr_state)
             IDLE: begin 
-                counter_trans <= 32'b0;
-                counter_wait <= 32'b0;
-                rx_last <= 1'b0;
+                if (start_c2h_d1 & ~start_c2h_d2 && (tcredit_used < credit_in_sync)) begin 
+                    curr_state <= TRANSFER;
+                    // curr_pkt_size <= tot_pkt_size;
+                    frame_size <= (tot_pkt_size > MAX_ETH_FRAME) ? MAX_ETH_FRAME : tot_pkt_size;
+                    curr_pkt_size <= tot_pkt_size;
+                end
+                rx_valid <= 0;
+                rx_last <= 0;
+                pkt_count <= 0;
+                tcredit_used <= 0;
+                credit_used_perpkt <= 0;
+                counter_wait <= 0;
+                counter_trans <= 0;
                 is_header <= 1'b1;
             end
             TRANSFER: begin
-                is_header <= 1'b0;
-                counter_trans = counter_trans + BYTES_PER_BEAT; //bytes
-                counter_wait <= 32'b0;
-                if ((counter_trans + BYTES_PER_BEAT) >= MAX_ETH_FRAME) begin
-                    rx_last <= 1'b1;
-                end else begin 
+                counter_wait <= counter_wait + 1;
+                if (rx_ready) begin 
+                    is_header <= 1'b0;
+                    rx_valid <= 1'b1;
+                    // counter_trans <= counter_trans + BYTES_PER_BEAT;
+                    if (counter_trans >= (frame_size - BYTES_PER_BEAT) && lst_credit_pkt) begin 
+                        rx_last <= 1'b1;
+                        tcredit_used <= tcredit_used + 1;
+                        curr_state <= WAIT;
+                    end else if (counter_trans >= (frame_size - BYTES_PER_BEAT)) begin 
+                        curr_state <= WAIT_FRAME;
+                        rx_valid <= 1'b0;
+                        counter_trans <= 0;
+                        curr_pkt_size <= curr_pkt_size - frame_size;
+                        tcredit_used <= tcredit_used + 1;
+                        credit_used_perpkt <= credit_used_perpkt + 1;
+                    end else begin 
+                        counter_trans <= counter_trans + BYTES_PER_BEAT;
+                    end
+                end
+            end
+            WAIT_FRAME: begin 
+                frame_size <= (curr_pkt_size > MAX_ETH_FRAME) ? MAX_ETH_FRAME : curr_pkt_size;
+                counter_wait <= counter_wait + 1;
+                if (rx_ready & (tcredit_used < credit_in_sync)) begin 
+                    is_header <= 1'b1;
+                    curr_state <= TRANSFER;
+                end
+                else if (tcredit_used == credit_needed) begin 
+                    curr_state <= IDLE;
+                    rx_valid <= 1'b0;
                     rx_last <= 1'b0;
+                end
+                else begin 
+                    rx_valid <= 1'b0;
                 end
             end
             WAIT: begin 
-                is_header <= 1'b1;
+                credit_used_perpkt <= 0;
+                rx_valid <= 1'b0;
                 rx_last <= 1'b0;
-                counter_trans <= 16'b0;
-                counter_wait <= counter_wait + 32'b1;
+                is_header <= 1'b1;
+                counter_wait <= (counter_wait == cycles_per_pkt-1) ? 0 : counter_wait + 1;
+                counter_trans <= 16'h0;
+                if (rx_ready) begin
+                    if (pkt_count == num_pkt-1) begin 
+                        curr_state <= IDLE;
+                        pkt_count <= pkt_count + 1;
+                    end else if ((credit_in_sync > tcredit_used) && (counter_wait == cycles_per_pkt-1)) begin 
+                        pkt_count <= pkt_count + 1'b1;
+                        curr_state <= TRANSFER;
+                        frame_size <= (tot_pkt_size > MAX_ETH_FRAME) ? MAX_ETH_FRAME : tot_pkt_size;
+                        curr_pkt_size <= tot_pkt_size;
+                        // max_count <= t_max_count;
+                    end 
+                end
             end
         endcase
     end
