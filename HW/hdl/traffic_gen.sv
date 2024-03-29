@@ -4,7 +4,7 @@ module traffic_gen #(
     parameter RX_LEN = 512, //data width
     parameter RX_BEN = RX_LEN/8,
     parameter TM_DSC_BITS = 16,
-    parameter FLOW_SPEED = 10000000//1Mbps
+    parameter FLOW_SPEED = 1000000000//1Mbps
 )
 (
     input logic axi_aclk,
@@ -69,17 +69,6 @@ always_ff @(posedge axi_aclk) begin
     start_c2h_d2 <= start_c2h_d1;
 end
 
-// always_ff @(posedge axi_aclk) begin 
-//     if(~axi_aresetn | ~start_c2h | (curr_state == WAIT)) begin 
-//         for (integer j=0; j<BYTES_PER_BEAT; j++)
-//             data_buf[j*8 +: 8] <= j[7:0];
-//     end
-//     else if (rx_valid & (~is_header)) begin 
-//         for (integer j=0; j<BYTES_PER_BEAT; j++)
-//             data_buf[j*8 +: 8] <= data_buf[j*8 +: 8] + BYTES_PER_BEAT;
-//     end
-// end
-
 always_ff @(posedge axi_aclk) begin 
     if (~axi_aresetn)
         start_c2h <= 0;
@@ -97,47 +86,8 @@ always @(posedge axi_aclk)
     else if (start_c2h & credit_updt)
         credit_in_sync <= credit_in_sync + credit_in;
 
-// always_comb begin
-//     rx_data = RX_LEN'(0);
-//     case (curr_state)
-//         IDLE: begin 
-//             rx_data = RX_LEN'(0);
-//             rx_ben = RX_BEN'(0);
-//         end
-//         TRANSFER: begin 
-//             if (is_header) begin 
-//                 rx_data[111:0] = header_buf;
-//                 rx_ben = {RX_BEN{1'b1}};
-//                 for (integer j = 14 ; j < BYTES_PER_BEAT; j++)
-//                     rx_data[j*8 +: 8] = 8'h41;
-//                     // rx_data[j*8 +: 8] = data_buf[(j-14)*8 +: 8];
-//             end
-//             else begin 
-//                 for (integer j = 0; j < BYTES_PER_BEAT; j++) begin
-//                     if (((counter_trans + j) >= (frame_size - 4)) && ((counter_trans + j) < frame_size)) begin
-//                         rx_data[j*8 +: 8] = crc[(counter_trans + j - frame_size + 4)*8 +: 8];
-//                         rx_ben[j] = 1'b1;
-//                     end 
-//                     else if ((counter_trans + j) >= frame_size) begin 
-//                         rx_data[j*8 +: 8] = 8'b0;
-//                         rx_ben[j] = 1'b0;
-//                     end else begin 
-//                         // rx_data[j*8 +: 8] = data_buf[j*8 +: 8] + (BYTES_PER_BEAT - 14);
-//                         rx_data[j*8 +: 8] = 8'h41;
-//                         rx_ben[j] = 1'b1;
-//                     end
-//                 end
-//             end
-//         end
-//         WAIT: begin 
-//             rx_data = RX_LEN'(0);
-//             rx_ben = RX_BEN'(0);
-//         end
-//     endcase
-// end
-
 always_ff @(posedge axi_aclk) begin 
-    if (~axi_aresetn | ~start_c2h | rx_last) begin 
+    if (~axi_aresetn | ~start_c2h | rx_last | is_header) begin 
         for (integer j = 0 ; j < BYTES_PER_BEAT ; j++) begin
             if (j < 14) 
                 data_buf[8*j +: 8] <= #TCQ header_buf[8*j +: 8];
@@ -195,16 +145,18 @@ always_ff @(posedge axi_aclk) begin
                     // counter_trans <= counter_trans + BYTES_PER_BEAT;
                     if (counter_trans >= (frame_size - BYTES_PER_BEAT) && lst_credit_pkt) begin 
                         rx_last <= 1'b1;
+                        // is_header <= 1'b0;
                         tcredit_used <= tcredit_used + 1;
                         curr_state <= WAIT;
                     end else if (counter_trans >= (frame_size - BYTES_PER_BEAT)) begin 
                         curr_state <= WAIT_FRAME;
-                        rx_valid <= 1'b0;
+                        // rx_valid <= 1'b0;
                         counter_trans <= 0;
                         curr_pkt_size <= curr_pkt_size - frame_size;
                         tcredit_used <= tcredit_used + 1;
                         credit_used_perpkt <= credit_used_perpkt + 1;
                     end else begin 
+                        // is_header <= 1'b0;
                         counter_trans <= counter_trans + BYTES_PER_BEAT;
                     end
                 end
@@ -214,14 +166,14 @@ always_ff @(posedge axi_aclk) begin
                 counter_wait <= counter_wait + 1;
                 if (rx_ready & (tcredit_used < credit_in_sync)) begin 
                     is_header <= 1'b1;
+                    rx_valid <= 1'b0;
                     curr_state <= TRANSFER;
                 end
                 else if (tcredit_used == credit_needed) begin 
                     curr_state <= IDLE;
                     rx_valid <= 1'b0;
                     rx_last <= 1'b0;
-                end
-                else begin 
+                end else begin 
                     rx_valid <= 1'b0;
                 end
             end
