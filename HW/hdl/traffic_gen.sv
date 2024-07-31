@@ -4,14 +4,14 @@ module traffic_gen #(
     parameter RX_LEN = 512, //data width
     parameter RX_BEN = RX_LEN/8,
     parameter TM_DSC_BITS = 16,
-    parameter FLOW_SPEED = 1000000000//1Mbps
+    parameter FLOW_SPEED = 1000000000//1Gbps
 )
 (
     input logic axi_aclk,
     input logic axi_aresetn,
     input logic [31:0] control_reg,
     input logic [15:0] txr_size,
-    input logic [10:0] num_pkt,
+    input logic [15:0] num_pkt,
     input logic [TM_DSC_BITS-1:0] credit_in,
     input logic credit_updt,
     input logic [TM_DSC_BITS-1:0] credit_perpkt_in,
@@ -19,32 +19,34 @@ module traffic_gen #(
     input logic rx_ready,
     input logic [31:0] flow_speed,
     output logic rx_valid,
-    output logic [RX_BEN-1:0]  rx_ben,
+    output logic [RX_BEN-1:0] rx_ben,
     output logic [RX_LEN-1:0] rx_data, //1 byte
     output logic rx_last,
     output logic rx_end
 );
 localparam [31:0] cycles_per_second = 250000000;
 localparam BYTES_PER_BEAT = RX_LEN/8;
-localparam DST_MAC = 48'h43414d545344;
-localparam SRC_MAC = 48'h43414d435253;
+localparam DST_MAC = 48'h665544332211;
+localparam SRC_MAC = 48'h665544332211;
 localparam TCQ = 1;
 
 // logic [31:0] flow_speed [4] = '{1000000, 10000000, 100000000, 1000000000};//1Mbps, 10Mbps, 100mbps, 1Gbps ;
 logic [15:0] frame_size, tot_pkt_size, counter_trans, curr_pkt_size;
 logic [31:0] cycles_per_pkt;
 // assign frame_size = (txr_size > MAX_ETH_FRAME) ? MAX_ETH_FRAME : txr_size;
-assign cycles_per_pkt = txr_size * ( (cycles_per_second << 3) / FLOW_SPEED);
+// assign cycles_per_pkt = txr_size * ( (cycles_per_second << 3) / FLOW_SPEED);
+assign cycles_per_pkt = 400;
 
 logic is_header;
 logic [31:0] crc;
 logic [111:0] header_buf;
 logic [RX_LEN-1:0] data_buf;
 logic control_reg_1_d, start_c2h, start_c2h_d1, start_c2h_d2, ready;
+// logic control_reg_6_d, end_c2h, end_c2h_d1, end_c2h_d2;
 // logic [13:0] max_count, t_max_count;
 logic [TM_DSC_BITS-1:0] credit_used_perpkt, tcredit_used, credit_in_sync;
 logic lst_credit_pkt;
-logic [10:0] pkt_count;
+logic [15:0] pkt_count;
 // logic [12:0] count;
 // int count_pkt_drop;
 
@@ -59,6 +61,7 @@ enum logic [1:0] {IDLE, TRANSFER, WAIT_FRAME, WAIT} curr_state;
 //output signal
 always_ff @(posedge axi_aclk) begin 
     control_reg_1_d <= control_reg[1];
+//    control_reg_6_d <= control_reg[6];
     //max txr_size is 4kb, if pkt size is larger, more than one credit is needed.
     tot_pkt_size <= txr_size;
     // t_max_count <= ((txr_size%(RX_LEN/8) > 0) || txr_size == 0 ) ? (txr_size)/(RX_LEN/8) +1 : (txr_size)/(RX_LEN/8); //number of cycles needed to transfer a whole pkt
@@ -67,15 +70,24 @@ end
 always_ff @(posedge axi_aclk) begin 
     start_c2h_d1 <= start_c2h;
     start_c2h_d2 <= start_c2h_d1;
+    // end_c2h_d1 <= end_c2h;
+    // end_c2h_d2 <= end_c2h_d2;
 end
 
 always_ff @(posedge axi_aclk) begin 
-    if (~axi_aresetn)
+    if (~axi_aresetn) begin 
         start_c2h <= 0;
-    else if (control_reg_1_d)
+        // end_c2h <= 0;
+    end
+    else if (control_reg_1_d) begin 
         start_c2h <= 1;
-    else if (pkt_count >= num_pkt)
+        // end_c2h <= 0;
+    end
+    else if (pkt_count >= num_pkt) begin
+    // else if (control_reg_6_d) begin 
+    //     end_c2h <= 1;
         start_c2h <= 0;
+    end
 end
 
 always @(posedge axi_aclk)
@@ -185,11 +197,12 @@ always_ff @(posedge axi_aclk) begin
                 counter_wait <= (counter_wait == cycles_per_pkt-1) ? 0 : counter_wait + 1;
                 counter_trans <= 16'h0;
                 if (rx_ready) begin
-                    if (pkt_count == num_pkt-1) begin 
+                    if ((pkt_count == num_pkt-1) && (counter_wait == cycles_per_pkt-1) ) begin 
+                    // if (end_c2h_d1 & !end_c2h_d2) begin
                         curr_state <= IDLE;
                         pkt_count <= pkt_count + 1;
                     end else if ((credit_in_sync > tcredit_used) && (counter_wait == cycles_per_pkt-1)) begin 
-                        pkt_count <= pkt_count + 1'b1;
+                        pkt_count <= pkt_count + 1;
                         curr_state <= TRANSFER;
                         frame_size <= (tot_pkt_size > MAX_ETH_FRAME) ? MAX_ETH_FRAME : tot_pkt_size;
                         curr_pkt_size <= tot_pkt_size;
