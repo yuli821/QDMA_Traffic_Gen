@@ -27,6 +27,7 @@
 #define C2H_CONTROL_REG_MASK         0xF
 #define H2C_CONTROL_REG    0xC
 #define H2C_STATUS_REG    0x10
+#define CYCLES_PER_PKT    0x1C
 #define C2H_PACKET_COUNT_REG    0x20
 #define C2H_STATUS_REG                    0x18
 #define C2H_STREAM_MARKER_PKT_GEN_VAL     0x22
@@ -48,4 +49,3 @@ struct port_info {
 };
 
 extern struct port_info pinfo[QDMA_MAX_PORTS];
-

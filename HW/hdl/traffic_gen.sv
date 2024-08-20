@@ -1,6 +1,6 @@
 `timescale 1ps / 1ps
 module traffic_gen #(
-    parameter MAX_ETH_FRAME = 1518, //bytes
+    parameter MAX_ETH_FRAME = 4096, //bytes
     parameter RX_LEN = 512, //data width
     parameter RX_BEN = RX_LEN/8,
     parameter TM_DSC_BITS = 16,
@@ -17,7 +17,7 @@ module traffic_gen #(
     input logic [TM_DSC_BITS-1:0] credit_perpkt_in,
     input logic [TM_DSC_BITS-1:0] credit_needed,
     input logic rx_ready,
-    input logic [31:0] flow_speed,
+    input logic [31:0] cycles_per_pkt,
     output logic rx_valid,
     output logic [RX_BEN-1:0] rx_ben,
     output logic [RX_LEN-1:0] rx_data, //1 byte
@@ -32,10 +32,10 @@ localparam TCQ = 1;
 
 // logic [31:0] flow_speed [4] = '{1000000, 10000000, 100000000, 1000000000};//1Mbps, 10Mbps, 100mbps, 1Gbps ;
 logic [15:0] frame_size, tot_pkt_size, counter_trans, curr_pkt_size;
-logic [31:0] cycles_per_pkt;
+// logic [31:0] cycles_per_pkt;
 // assign frame_size = (txr_size > MAX_ETH_FRAME) ? MAX_ETH_FRAME : txr_size;
 // assign cycles_per_pkt = txr_size * ( (cycles_per_second << 3) / FLOW_SPEED);
-assign cycles_per_pkt = 400;
+// assign cycles_per_pkt = 400;
 
 logic is_header;
 logic [31:0] crc;
@@ -47,6 +47,7 @@ logic control_reg_1_d, start_c2h, start_c2h_d1, start_c2h_d2, ready;
 logic [TM_DSC_BITS-1:0] credit_used_perpkt, tcredit_used, credit_in_sync;
 logic lst_credit_pkt;
 logic [15:0] pkt_count;
+logic [9:0] cycles_needed;
 // logic [12:0] count;
 // int count_pkt_drop;
 
@@ -55,6 +56,7 @@ assign header_buf = {DST_MAC, SRC_MAC, 16'h2121}; //omit the length
 assign crc = 32'h0a212121;
 assign rx_end = (~rx_valid) & (num_pkt == pkt_count);
 assign lst_credit_pkt = (credit_perpkt_in - credit_used_perpkt) == 1;
+assign cycles_needed = tot_pkt_size[15:6] +| tot_pkt_size[5:0]; //pkt size must > 64 bytes
 
 enum logic [1:0] {IDLE, TRANSFER, WAIT_FRAME, WAIT} curr_state;
 
@@ -134,7 +136,7 @@ always_ff @(posedge axi_aclk) begin
     end else begin 
         case(curr_state)
             IDLE: begin 
-                if (start_c2h_d1 & ~start_c2h_d2 && (tcredit_used < credit_in_sync)) begin 
+                if (start_c2h_d1 & ~start_c2h_d2 && (tcredit_used < credit_in_sync) && (cycles_per_pkt > cycles_needed)) begin 
                     curr_state <= TRANSFER;
                     // curr_pkt_size <= tot_pkt_size;
                     frame_size <= (tot_pkt_size > MAX_ETH_FRAME) ? MAX_ETH_FRAME : tot_pkt_size;
@@ -194,10 +196,10 @@ always_ff @(posedge axi_aclk) begin
                 rx_valid <= 1'b0;
                 rx_last <= 1'b0;
                 is_header <= 1'b1;
-                counter_wait <= (counter_wait == cycles_per_pkt-1) ? 0 : counter_wait + 1;
+                counter_wait <= (counter_wait >= cycles_per_pkt-1) ? 0 : counter_wait + 1;
                 counter_trans <= 16'h0;
                 if (rx_ready) begin
-                    if ((pkt_count == num_pkt-1) && (counter_wait == cycles_per_pkt-1) ) begin 
+                    if ((pkt_count == num_pkt-1) && (counter_wait >= cycles_per_pkt-1) ) begin 
                     // if (end_c2h_d1 & !end_c2h_d2) begin
                         curr_state <= IDLE;
                         pkt_count <= pkt_count + 1;
