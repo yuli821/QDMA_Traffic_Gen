@@ -121,12 +121,12 @@ always_ff @(posedge axi_aclk) begin
     end else begin 
         case(curr_state)
             IDLE: begin 
+                cycles_pkt <= (cycles_per_pkt > cycles_needed) ? cycles_per_pkt : cycles_needed;
                 if (start_c2h_d1 & ~start_c2h_d2 && (tcredit_used < credit_in_sync)) begin 
                     curr_state <= TRANSFER;
                     frame_size <= (tot_pkt_size > MAX_ETH_FRAME) ? MAX_ETH_FRAME : tot_pkt_size;
                     curr_pkt_size <= tot_pkt_size;
                 end
-                cycles_pkt <= (cycles_per_pkt > cycles_needed) ? cycles_per_pkt : cycles_needed;
                 rx_valid <= 0;
                 rx_last <= 0;
                 pkt_count <= 0;
@@ -143,6 +143,7 @@ always_ff @(posedge axi_aclk) begin
                     rx_valid <= 1'b1;
                     if (counter_trans >= (frame_size - BYTES_PER_BEAT) && lst_credit_pkt) begin 
                         rx_last <= 1'b1;
+                        counter_trans <= 0;
                         tcredit_used <= tcredit_used + 1;
                         curr_state <= WAIT;
                     end else if (counter_trans >= (frame_size - BYTES_PER_BEAT)) begin 
@@ -179,11 +180,11 @@ always_ff @(posedge axi_aclk) begin
                     rx_last <= 1'b0;
                     is_header <= 1'b1;
                     counter_trans <= 16'h0;
-                    if ((pkt_count == num_pkt-1) && (counter_wait == cycles_pkt-1) ) begin 
+                    if ((pkt_count == num_pkt-1) && (counter_wait >= cycles_pkt-1) ) begin 
                         curr_state <= IDLE;
                         pkt_count <= pkt_count + 1;
                         counter_wait <= 0;
-                    end else if ((credit_in_sync > tcredit_used) && (counter_wait == cycles_pkt-1)) begin 
+                    end else if ((credit_in_sync > tcredit_used) && (counter_wait >= cycles_pkt-1)) begin 
                         pkt_count <= pkt_count + 1;
                         curr_state <= TRANSFER;
                         frame_size <= (tot_pkt_size > MAX_ETH_FRAME) ? MAX_ETH_FRAME : tot_pkt_size;

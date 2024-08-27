@@ -250,19 +250,19 @@ int main(int argc, char* argv[]) {
         // if (nb_rx > 0) {
             // rte_pmd_qdma_dbg_reg_info_dump(portid, 2, 0xb44);
             // rte_pmd_qdma_dbg_qinfo(portid, 0);
-            printf("recv_count: %d, total_recv_pkts: %d, intend to recv: %d\n", nb_rx, recvpkts, nb_pkts);
+        // printf("recv_count: %d, total_recv_pkts: %d, intend to recv: %d\n", nb_rx, recvpkts, nb_pkts);
         // }
         recvpkts += nb_rx;
         tmp -= nb_rx;
         count_pkt += nb_rx;
         tmp_pkts = nb_pkts;
         while ((nb_rx < tmp_pkts) && max_rx_retry) {
-            rte_delay_us(1);
+            // rte_delay_us(1);
             tmp_pkts -= nb_rx;
             nb_rx = rte_eth_rx_burst(portid, queueid, &pkts[count_pkt], tmp_pkts);
-            if (nb_rx > 0) {
-                printf("recv_count: %d, total_recv_pkts: %d\n", nb_rx, recvpkts);
-            }
+            // if (nb_rx > 0) {
+            //     printf("recv_count: %d, total_recv_pkts: %d\n", nb_rx, recvpkts);
+            // }
             recvpkts += nb_rx;
             max_rx_retry--;
             tmp -= nb_rx;
@@ -272,10 +272,10 @@ int main(int argc, char* argv[]) {
             // rte_delay_ms(1);
             struct rte_mbuf *mb = pkts[i];
             // while (mb != NULL) {
-            // ret += write(fd, rte_pktmbuf_mtod(mb, void*),rte_pktmbuf_data_len(mb));
-            // printf("Number of bytes send: %d\n", ret);
-            // nxtmb = mb->next;
-            // mb = nxtmb;
+            //     ret += write(fd, rte_pktmbuf_mtod(mb, void*),rte_pktmbuf_data_len(mb));
+            //     printf("Number of bytes send: %d\n", ret);
+            //     nxtmb = mb->next;
+            //     mb = nxtmb;
             // }
             // mb = pkts[i];
             rte_pktmbuf_free(mb);
