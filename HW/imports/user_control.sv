@@ -56,6 +56,7 @@
 
 module user_control 
   #(
+   parameter MAX_ETH_FRAME = 16'h1000,
     parameter C_DATA_WIDTH = 64,
     parameter QID_MAX = 64,
     parameter TM_DSC_BITS = 16,
@@ -80,7 +81,6 @@ module user_control
    (
     input axi_aclk,
     input axi_aresetn,
-    output [31:0] flow_speed,
     input m_axil_wvalid,
     input m_axil_wready,
     input m_axil_rvalid,
@@ -101,6 +101,7 @@ module user_control
     input axi_st_h2c_ready,
     input axi_st_c2h_valid,
     input axi_st_c2h_ready,
+    input [10:0] c2h_qid,
     output [31:0] c2h_control,
     output reg [15:0] c2h_num_pkt,
     output reg [10:0] c2h_st_qid,
@@ -164,7 +165,8 @@ module user_control
     output reg [31:0]  single_bit_err_inject_reg,
     output reg [31:0]  double_bit_err_inject_reg,
 
-    output reg [31:0] cycles_per_pkt
+    output reg [31:0] cycles_per_pkt,
+    output reg [10:0] c2h_num_queue
     );
 
    reg [31:0] 	       control_reg_h2c;
@@ -212,6 +214,7 @@ module user_control
    wire reg_x10_read;
    reg [31:0] pfch_byp_tag_reg;
    
+   // reg [31:0] c2h_num_queue;
 
    // Interpreting request on the axilite master interface
    wire [31:0] wr_addr;
@@ -300,60 +303,62 @@ module user_control
    
    always @(posedge axi_aclk) begin
       if (!axi_aresetn) begin
-	 c2h_st_qid <= 1;
-	 c2h_st_len <= 16'h80;  // default transfer size set to 128Bytes
-	 control_reg_h2c <= 32'h0;
-	 control_reg_c2h <= 32'h0;
-    cycles_per_pkt <= 32'h0;
-	 wb_dat[255:0] <= 0;
-	 cmpt_size[31:0] <= 0;
-	 c2h_num_pkt <= 16'h1;
-	 perf_ctl <= 0;
-//	 perf_ctl <= 5'b11001;
-	 scratch_reg1 <=0;
-	 scratch_reg2 <=0;
-	 pfch_byp_tag_reg <= 0;
-	 c2h_st_buffsz<=16'h1000;  // default buff size 4K
-         dsc_bypass <= 6'h0;
-	 usr_irq <= 'h0;
-	 usr_irq_msk <= 'h0;
-	 usr_irq_num <= 'h0;
-	 invalid_axilm_addr <= 'h0;
-	 gen_qdma_reset <= 1'b0;
-	 single_bit_err_inject_reg <= 32'h0;
-     double_bit_err_inject_reg <= 32'h0;
+         c2h_st_qid <= 1;
+         c2h_st_len <= 16'h80;  // default transfer size set to 128Bytes
+         control_reg_h2c <= 32'h0;
+         control_reg_c2h <= 32'h0;
+         cycles_per_pkt <= 32'h0;
+         wb_dat[255:0] <= 0;
+         cmpt_size[31:0] <= 0;
+         c2h_num_pkt <= 16'h1;
+         perf_ctl <= 0;
+      //	 perf_ctl <= 5'b11001;
+         scratch_reg1 <=0;
+         scratch_reg2 <=0;
+         pfch_byp_tag_reg <= 0;
+         c2h_st_buffsz<=16'h1000;  // default buff size 4K
+               dsc_bypass <= 6'h0;
+         usr_irq <= 'h0;
+         usr_irq_msk <= 'h0;
+         usr_irq_num <= 'h0;
+         invalid_axilm_addr <= 'h0;
+         gen_qdma_reset <= 1'b0;
+         single_bit_err_inject_reg <= 32'h0;
+         double_bit_err_inject_reg <= 32'h0;
+         c2h_num_queue <= 32'b1;
       end
       else if (m_axil_wvalid && m_axil_wready ) begin
-	 case (wr_addr)
-	   32'h00 : c2h_st_qid     <= m_axil_wdata[10:0];
-	   32'h04 : c2h_st_len     <= m_axil_wdata[15:0];
-	   32'h08 : control_reg_c2h<= m_axil_wdata[31:0];
-	   32'h0C : control_reg_h2c<= m_axil_wdata[31:0];
-      32'h1C : cycles_per_pkt<= m_axil_wdata[31:0];
-	   32'h20 : c2h_num_pkt  <= m_axil_wdata[15:0];
-	   32'h24 : pfch_byp_tag_reg   <= m_axil_wdata[31:0];
-	   32'h30 : wb_dat[31:0]   <= m_axil_wdata[31:0];
-	   32'h34 : wb_dat[63:32]  <= m_axil_wdata[31:0];
-	   32'h38 : wb_dat[95:64]  <= m_axil_wdata[31:0];
-	   32'h3C : wb_dat[127:96] <= m_axil_wdata[31:0];
-	   32'h40 : wb_dat[159:128]<= m_axil_wdata[31:0];
-	   32'h44 : wb_dat[191:160]<= m_axil_wdata[31:0];
-	   32'h48 : wb_dat[223:192]<= m_axil_wdata[31:0];
-	   32'h4C : wb_dat[255:224]<= m_axil_wdata[31:0];
-	   32'h50 : cmpt_size[31:0]  <= m_axil_wdata[31:0];
-	   32'h60 : scratch_reg1[31:0]  <= m_axil_wdata[31:0];
-	   32'h64 : scratch_reg2[31:0]  <= m_axil_wdata[31:0];
-	   32'h68 : single_bit_err_inject_reg[31:0] <= m_axil_wdata[31:0];
-	   32'h6C : double_bit_err_inject_reg[31:0] <= m_axil_wdata[31:0];
-	   32'h70 : perf_ctl[4:0]  <= m_axil_wdata[4:0];
-	   32'h84 : c2h_st_buffsz  <= m_axil_wdata[15:0];
-	   32'h90 : dsc_bypass[5:0]    <= m_axil_wdata[5:0];
-	   32'h94 : usr_irq[19:0] <= m_axil_wdata[19:0];
-	   32'h98 : usr_irq_msk[31:0] <= m_axil_wdata[31:0];
-	   32'h9C : usr_irq_num[31:0] <= m_axil_wdata[31:0];
-	   32'hA0 : gen_qdma_reset <= m_axil_wdata[0]; //Write 1 to reset, self clearing register
-      32'hFFFFFFFF: invalid_axilm_addr <= 1'b1;
-	 endcase // case (m_axil_awaddr[15:0])
+         case (wr_addr)
+            32'h00 : c2h_st_qid     <= m_axil_wdata[10:0]; //base qid
+            32'h04 : c2h_st_len     <= m_axil_wdata[15:0];
+            32'h08 : control_reg_c2h<= m_axil_wdata[31:0];
+            32'h0C : control_reg_h2c<= m_axil_wdata[31:0];
+            32'h1C : cycles_per_pkt<= m_axil_wdata[31:0];
+            32'h20 : c2h_num_pkt  <= m_axil_wdata[15:0];
+            32'h24 : pfch_byp_tag_reg   <= m_axil_wdata[31:0];
+            32'h28 : c2h_num_queue <= m_axil_wdata[10:0]; //number of queues
+            32'h30 : wb_dat[31:0]   <= m_axil_wdata[31:0];
+            32'h34 : wb_dat[63:32]  <= m_axil_wdata[31:0];
+            32'h38 : wb_dat[95:64]  <= m_axil_wdata[31:0];
+            32'h3C : wb_dat[127:96] <= m_axil_wdata[31:0];
+            32'h40 : wb_dat[159:128]<= m_axil_wdata[31:0];
+            32'h44 : wb_dat[191:160]<= m_axil_wdata[31:0];
+            32'h48 : wb_dat[223:192]<= m_axil_wdata[31:0];
+            32'h4C : wb_dat[255:224]<= m_axil_wdata[31:0];
+            32'h50 : cmpt_size[31:0]  <= m_axil_wdata[31:0];
+            32'h60 : scratch_reg1[31:0]  <= m_axil_wdata[31:0];
+            32'h64 : scratch_reg2[31:0]  <= m_axil_wdata[31:0];
+            32'h68 : single_bit_err_inject_reg[31:0] <= m_axil_wdata[31:0];
+            32'h6C : double_bit_err_inject_reg[31:0] <= m_axil_wdata[31:0];
+            32'h70 : perf_ctl[4:0]  <= m_axil_wdata[4:0];
+            32'h84 : c2h_st_buffsz  <= m_axil_wdata[15:0];
+            32'h90 : dsc_bypass[5:0]    <= m_axil_wdata[5:0];
+            32'h94 : usr_irq[19:0] <= m_axil_wdata[19:0];
+            32'h98 : usr_irq_msk[31:0] <= m_axil_wdata[31:0];
+            32'h9C : usr_irq_num[31:0] <= m_axil_wdata[31:0];
+            32'hA0 : gen_qdma_reset <= m_axil_wdata[0]; //Write 1 to reset, self clearing register
+            32'hFFFFFFFF: invalid_axilm_addr <= 1'b1;
+         endcase // case (m_axil_awaddr[15:0])
       end // if (m_axil_wvalid && m_axil_wready )
       else begin
          // c2h_num_pkt <= 16'h0400;//0100 0000 0000 1024
@@ -438,6 +443,7 @@ module user_control
 	32'h18 : m_axil_rdata  = {32'h0 | c2h_status};
    32'h1C : m_axil_rdata  = cycles_per_pkt[31:0];
 	32'h20 : m_axil_rdata  = (32'h0 | c2h_num_pkt[15:0]);
+   32'h28 : m_axil_rdata = {32'h0 | c2h_num_queue};
 	32'h30 : m_axil_rdata  = wb_dat[31:0];
 	32'h34 : m_axil_rdata  = wb_dat[63:32];
 	32'h38 : m_axil_rdata  = wb_dat[95:64];
@@ -616,8 +622,8 @@ module user_control
 			  credit_updt ? rd_credit_out_bram - credit_out : 
 			  rd_credit_out_bram + tm_dsc_sts_avl_d1;
 
-   assign wr_credit_qid = credit_updt ? c2h_st_qid : tm_dsc_sts_qid_d1;
-   assign rd_credit_qid = tm_update ? tm_dsc_sts_qid : c2h_st_qid;
+   assign wr_credit_qid = credit_updt ? c2h_qid : tm_dsc_sts_qid_d1;
+   assign rd_credit_qid = tm_update ? tm_dsc_sts_qid : c2h_qid;
    
    xpm_memory_sdpram # 
      (
@@ -742,20 +748,22 @@ module user_control
 
    always @(posedge axi_aclk) begin
       if (!axi_aresetn) begin
-	 credit_needed <= 0;
-	 credit_perpkt_in <= 0;
+         credit_needed <= 0;
+         credit_perpkt_in <= 0;
       end
       else begin
 	 // Designing for 4K buffer size only
-	 if (start_c2h_pls) begin
-      // credit_needed <= (c2h_st_len % 4096 > 0 ? c2h_st_len/4096 + 1 : c2h_st_len/4096) * c2h_num_pkt;
-      credit_needed <= c2h_num_pkt;
-      credit_perpkt_in <= 1;
-      // credit_needed <= 16'hffff;
-      // credit_perpkt_in <= (c2h_st_len <= 4096) ? 1 : (c2h_st_len % 4096 > 0 ? c2h_st_len/4096 + 1 : c2h_st_len/4096);
-	   // credit_needed    <= ((c2h_st_len[15:0] < c2h_st_buffsz[15:0]) ? 1 : c2h_st_len[15:12]+|c2h_st_len[11:0]) * c2h_num_pkt[10:0];
-	   // credit_perpkt_in <=  (c2h_st_len[15:0] < c2h_st_buffsz[15:0]) ? 1 : c2h_st_len[15:12]+|c2h_st_len[11:0];
-	 end
+         if (start_c2h_pls) begin
+            // credit_needed <= (c2h_st_len % MAX_ETH_FRAME > 0 ? c2h_st_len/MAX_ETH_FRAME + 1 : c2h_st_len/MAX_ETH_FRAME) * c2h_num_pkt;
+            // credit_needed <= c2h_num_pkt;
+            // credit_perpkt_in <= 1;
+            // credit_perpkt_in <= (c2h_st_len <= MAX_ETH_FRAME) ? 1 : (c2h_st_len % MAX_ETH_FRAME > 0 ? c2h_st_len/MAX_ETH_FRAME + 1 : c2h_st_len/MAX_ETH_FRAME);
+            // credit_needed    <= ((c2h_st_len[15:0] <= MAX_ETH_FRAME) ? 1 : c2h_st_len[15:12]+|c2h_st_len[11:0]) * c2h_num_pkt;
+            // credit_needed <= 2048;
+            // credit_perpkt_in <=  (c2h_st_len[15:0] <= MAX_ETH_FRAME) ? 1 : c2h_st_len[15:12]+|c2h_st_len[11:0];
+            credit_needed <= c2h_num_pkt;
+            credit_perpkt_in <= 1;
+         end
       end
    end
 

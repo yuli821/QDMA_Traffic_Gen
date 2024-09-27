@@ -467,7 +467,6 @@ module qdma_app #(
   wire                                  out_axis_pld_tvalid;
   wire                                  out_axis_pld_tready;
 
-  wire [31:0]   flow_speed;
   wire [15:0]   c2h_num_pkt;
   wire [10:0]   c2h_st_qid;
   wire [15:0]   c2h_st_len;
@@ -480,6 +479,7 @@ module qdma_app #(
   wire [10:0]   h2c_qid;
   wire [31:0]   cmpt_size;
   wire [255:0]  wb_dat;
+  wire [10:0] c2h_qid;
 
   wire [TM_DSC_BITS-1:0]   credit_out;
   wire [TM_DSC_BITS-1:0]   credit_needed;
@@ -494,6 +494,7 @@ module qdma_app #(
   wire 			  h2c_dsc_bypass;
 
   wire [31:0] cycles_per_pkt;
+  wire [10:0] c2h_num_queue;
 
   // The sys_rst_n input is active low based on the core configuration
   assign sys_resetn = sys_rst_n;
@@ -524,12 +525,13 @@ module qdma_app #(
   assign dsc_crdt_in_vld   = (start_c2h_d & ~start_c2h_d1) & (c2h_dsc_bypass == 2'b10);
   assign dsc_crdt_in_dir   = start_c2h_d;
   assign dsc_crdt_in_fence = 1'b0;  // fix me
-  assign dsc_crdt_in_qid   = c2h_st_qid;
+  assign dsc_crdt_in_qid   = c2h_qid;
   assign dsc_crdt_in_crdt  = credit_needed;
 
   assign c2h_byp_in_st_sim_at = c2h_byp_in_st_csh_at;
   user_control
     #(
+      .MAX_ETH_FRAME(16'h1000),
       .C_DATA_WIDTH (C_DATA_WIDTH),
       .QID_MAX (2048),
       .PF0_M_AXILITE_ADDR_MSK( 32'h00000FFF),
@@ -552,10 +554,10 @@ module qdma_app #(
       )
   user_control_i
     (
+     .c2h_num_queue(c2h_num_queue),
      .cycles_per_pkt(cycles_per_pkt),
      .axi_aclk (clk),
      .axi_aresetn    (user_resetn),
-     .flow_speed(flow_speed),
      .single_bit_err_inject_reg (),
      .double_bit_err_inject_reg (),
      .m_axil_wvalid    (s_axil_wvalid),
@@ -764,6 +766,7 @@ module qdma_app #(
 
   axi_st_module
   #(
+    .MAX_ETH_FRAME(16'h1000),
     .C_DATA_WIDTH      ( C_DATA_WIDTH ),
     .CRC_WIDTH         ( CRC_WIDTH ),
     .C_H2C_TUSER_WIDTH ( C_H2C_TUSER_WIDTH ),
@@ -771,10 +774,10 @@ module qdma_app #(
     )
   axi_st_module_i
     (
+    .c2h_num_queue(c2h_num_queue),
     .cycles_per_pkt(cycles_per_pkt),
     .axi_aresetn (mid_reset_n),
     .axi_aclk (user_clk),
-    .flow_speed(flow_speed),
     .c2h_st_qid (c2h_st_qid),
     .c2h_control (c2h_control),
     .clr_h2c_match (clr_h2c_match),
@@ -828,8 +831,8 @@ module qdma_app #(
     .s_axis_c2h_cmpt_ctrl_user_trig      (s_axis_c2h_cmpt_ctrl_user_trig_int       ),
     .s_axis_c2h_cmpt_ctrl_col_idx        (s_axis_c2h_cmpt_ctrl_col_idx_int),
     .s_axis_c2h_cmpt_ctrl_err_idx        (s_axis_c2h_cmpt_ctrl_err_idx_int),
-    .s_axis_c2h_cmpt_tready              (s_axis_c2h_cmpt_tready)
-
+    .s_axis_c2h_cmpt_tready              (s_axis_c2h_cmpt_tready),
+    .c2h_qid(c2h_qid)
   );
 
   // LEDs for observation

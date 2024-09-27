@@ -74,6 +74,7 @@
 
 module axi_st_module
   #( 
+     parameter MAX_ETH_FRAME = 16'h1000,
      parameter C_DATA_WIDTH = 256,
      parameter CRC_WIDTH    = 32,
      parameter C_H2C_TUSER_WIDTH = 128,
@@ -82,8 +83,7 @@ module axi_st_module
    (
     input axi_aresetn ,
     input axi_aclk,
-
-    input [31:0] flow_speed,
+    
     input [10:0] c2h_st_qid,
     input [31:0] c2h_control,
     input clr_h2c_match,
@@ -104,6 +104,7 @@ module axi_st_module
     input                          m_axis_h2c_tlast /* synthesis syn_keep = 1 */,
 
     input [31:0]    cycles_per_pkt,
+    input [10:0]    c2h_num_queue,
     
     output [C_DATA_WIDTH-1 :0]     s_axis_c2h_tdata /* synthesis syn_keep = 1 */,  
     output [C_DATA_WIDTH/8-1:0]       s_axis_c2h_dpar  /* synthesis syn_keep = 1 */, 
@@ -141,7 +142,8 @@ module axi_st_module
     output                         h2c_match,
     output logic                   h2c_crc_match,
     output                         c2h_end,
-    output reg [10:0]              h2c_qid
+    output reg [10:0]              h2c_qid,
+    output c2h_qid
     );
 
    logic [CRC_WIDTH-1 : 0]     gen_h2c_tcrc;
@@ -154,6 +156,8 @@ module axi_st_module
    logic [15:0] 	       cmpt_pkt_cnt;
    logic 		       cmpt_tvalid;
    logic 		       start_cmpt;
+
+  //  logic [10:0]   c2h_qid;
 
 //   logic  m_axis_h2c_tready;
 //   logic [C_DATA_WIDTH-1 :0] s_axis_c2h_tdata;
@@ -184,7 +188,7 @@ module axi_st_module
    assign s_axis_c2h_mty = s_axis_c2h_tlast ? s_axis_c2h_mty_reg : 6'h0;
    assign s_axis_c2h_ctrl_len = s_axis_c2h_ctrl_len_reg;
 
-   assign s_axis_c2h_ctrl_qid = c2h_dsc_bypass[1:0] == 2'b10 ? pfch_byp_tag_qid : c2h_st_qid;
+   assign s_axis_c2h_ctrl_qid = c2h_dsc_bypass[1:0] == 2'b10 ? pfch_byp_tag_qid : c2h_qid;
   
  // C2H Stream data CRC Generator
    crc32_gen #(
@@ -229,7 +233,7 @@ module axi_st_module
 	// .c2h_tready  (s_axis_c2h_tready)
   // );
 
-traffic_gen #(.RX_LEN(C_DATA_WIDTH), .FLOW_SPEED(1000000000), .MAX_ETH_FRAME(4096), .TM_DSC_BITS(TM_DSC_BITS)) 
+traffic_gen #(.RX_LEN(C_DATA_WIDTH), .MAX_ETH_FRAME(MAX_ETH_FRAME), .TM_DSC_BITS(TM_DSC_BITS)) 
 traffic_gen_c2h(
     .axi_aclk(axi_aclk),
     .axi_aresetn(axi_aresetn),
@@ -242,11 +246,14 @@ traffic_gen_c2h(
     .credit_needed(credit_needed),
     .rx_ready(s_axis_c2h_tready),
     .cycles_per_pkt(cycles_per_pkt),
+    .qid(c2h_st_qid),
+    .num_queue(c2h_num_queue),
     .rx_valid(s_axis_c2h_tvalid),
     .rx_ben(s_axis_c2h_dpar),
     .rx_data(s_axis_c2h_tdata),
     .rx_last(s_axis_c2h_tlast),
-    .rx_end(c2h_end)
+    .rx_end(c2h_end),
+    .rx_qid(c2h_qid)
 );
 
   ST_h2c #(
@@ -309,11 +316,11 @@ traffic_gen_c2h(
 
    always @(posedge axi_aclk ) begin
       if (~axi_aresetn)
-         h2c_crc_match <= 0;
-      else if (( clr_h2c_match ) | ((m_axis_h2c_tlast_reg) & (m_axis_h2c_tcrc_reg != gen_h2c_tcrc)))
-      	   h2c_crc_match <= 0;
-      else if ((m_axis_h2c_tlast_reg) & (m_axis_h2c_tcrc_reg == gen_h2c_tcrc) )
-      	   h2c_crc_match <= 1;
+        h2c_crc_match <= 0;
+      else if (clr_h2c_match | (m_axis_h2c_tlast_reg & (m_axis_h2c_tcrc_reg != gen_h2c_tcrc)))
+      	h2c_crc_match <= 0;
+      else if (m_axis_h2c_tlast_reg & (m_axis_h2c_tcrc_reg == gen_h2c_tcrc) )
+      	h2c_crc_match <= 1;
       end
 
 localparam [0:0] 
@@ -409,7 +416,7 @@ end
 
    assign s_axis_c2h_cmpt_tvalid = start_imm | cmpt_tvalid;
 
-   assign s_axis_c2h_cmpt_ctrl_qid = c2h_st_qid;
+   assign s_axis_c2h_cmpt_ctrl_qid = c2h_qid;
 //   assign s_axis_c2h_cmpt_ctrl_cmpt_type = cmpt_size[13:12];
    assign s_axis_c2h_cmpt_ctrl_cmpt_type = start_imm ? 2'b00 : cmpt_size[12] ? 2'b01 : 2'b11;
    assign s_axis_c2h_cmpt_ctrl_wait_pld_pkt_id = cmpt_pkt_cnt[15:0];
