@@ -15,6 +15,7 @@
 #include <unistd.h>
 #include <getopt.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include "../../drivers/net/qdma/rte_pmd_qdma.h"
 #include "test.h"
 #include "pcierw.h"
@@ -24,6 +25,17 @@
 
 int num_ports;
 struct port_info pinfo[QDMA_MAX_PORTS];
+#define MAX_RX_QUEUE_PER_LCORE 16
+#define MAX_TX_QUEUE_PER_PORT 16
+
+volatile int recv_pkts = 0;
+pthread_mutex_t lock;
+
+struct lcore_queue_conf {
+	unsigned n_rx_port;
+	unsigned rx_port_list[MAX_RX_QUEUE_PER_LCORE];
+} __rte_cache_aligned;
+struct lcore_queue_conf lcore_queue_conf[RTE_MAX_LCORE];
 
 int port_init(int portid, int num_queues, int st_queues, int nb_descs, int buff_size)
 {
@@ -96,31 +108,68 @@ int port_init(int portid, int num_queues, int st_queues, int nb_descs, int buff_
     pinfo[portid].nb_descs = nb_descs;
 
     for (x = 0; x < num_queues; x++) {
-    if (x < st_queues) {
-    diag = rte_pmd_qdma_set_queue_mode(portid, x, RTE_PMD_QDMA_STREAMING_MODE);
-    if (diag < 0)
-    rte_exit(EXIT_FAILURE, "rte_pmd_qdma_set_queue_mode : Passing of QUEUE_MODE failed\n");
-    } else {
-    diag = rte_pmd_qdma_set_queue_mode(portid, x, RTE_PMD_QDMA_MEMORY_MAPPED_MODE);
-    if (diag < 0)
-    rte_exit(EXIT_FAILURE, "rte_pmd_qdma_set_queue_mode : Passing of QUEUE_MODE failed\n");
-    }
+        if (x < st_queues) {
+            diag = rte_pmd_qdma_set_queue_mode(portid, x, RTE_PMD_QDMA_STREAMING_MODE);
+            if (diag < 0)
+                rte_exit(EXIT_FAILURE, "rte_pmd_qdma_set_queue_mode : Passing of QUEUE_MODE failed\n");
+        } else {
+            diag = rte_pmd_qdma_set_queue_mode(portid, x, RTE_PMD_QDMA_MEMORY_MAPPED_MODE);
+            if (diag < 0)
+                rte_exit(EXIT_FAILURE, "rte_pmd_qdma_set_queue_mode : Passing of QUEUE_MODE failed\n");
+        }
 
-    diag = rte_eth_tx_queue_setup(portid, x, nb_descs, 0, &tx_conf);
-    if (diag < 0)
-    rte_exit(EXIT_FAILURE, "Cannot setup port %d TX Queue id:%d (err=%d)\n", portid, x, diag);
-    rx_conf.rx_thresh.wthresh = DEFAULT_RX_WRITEBACK_THRESH;
-    diag = rte_eth_rx_queue_setup(portid, x, nb_descs, 0, &rx_conf, mbuf_pool);
-    if (diag < 0)
-    rte_exit(EXIT_FAILURE, "Cannot setup port %d RX Queue 0 (err=%d)\n", portid, diag);
+        diag = rte_eth_tx_queue_setup(portid, x, nb_descs, 0, &tx_conf);
+        if (diag < 0)
+            rte_exit(EXIT_FAILURE, "Cannot setup port %d TX Queue id:%d (err=%d)\n", portid, x, diag);
+        rx_conf.rx_thresh.wthresh = DEFAULT_RX_WRITEBACK_THRESH;
+        diag = rte_eth_rx_queue_setup(portid, x, nb_descs, 0, &rx_conf, mbuf_pool);
+        if (diag < 0)
+            rte_exit(EXIT_FAILURE, "Cannot setup port %d RX Queue 0 (err=%d)\n", portid, diag);
     }
 
     diag = rte_eth_dev_start(portid);
     if (diag < 0)
-    rte_exit(EXIT_FAILURE, "Cannot start port %d (err=%d)\n", portid, diag);
+        rte_exit(EXIT_FAILURE, "Cannot start port %d (err=%d)\n", portid, diag);
 
     return 0;
+}
+typedef struct input_arg {
+    int** core_to_q;
+    int numpkts;
+    int portid;
+} input_arg_t;
+
+static int recv_pkt_single_core(input_arg_t* inputs) { // for each lcore
+    int recvpkts = 0;
+    int nb_rx, count_pkt;
+    int idx2, idx = rte_lcore_id();
+    int** core_to_q = inputs->core_to_q;
+    int numpkts = inputs->numpkts;
+    int portid = inputs->portid;
+    struct rte_mbuf *pkts[NUM_RX_PKTS] = { NULL };
+    while(recvpkts < numpkts){
+        count_pkt = 0;
+        idx2 = 0;
+        while(core_to_q[idx][idx2] != -1) {
+            rte_delay_us(1);
+            nb_rx = rte_eth_rx_burst(portid, core_to_q[idx][idx2], pkts, NUM_RX_PKTS);
+            if (nb_rx > 0) {
+                printf("recv_count: %d, total_recv_pkts: %d, queueid: %d, lcoreid: %d\n", nb_rx, recvpkts, core_to_q[idx][idx2], idx);
+            }
+            count_pkt += nb_rx;
+            for (int i = 0; i < nb_rx; i++) {
+                struct rte_mbuf *mb = pkts[i];
+                rte_pktmbuf_free(mb);
+            }
+            idx2++;
+        }
+        pthread_mutex_lock(&lock);
+        recv_pkts += count_pkt;
+        recvpkts = recv_pkts;
+        pthread_mutex_unlock(&lock);
     }
+    return 0;
+}
 
 int main(int argc, char* argv[]) {
     //measure the latency of QDMA read of different loads, start from 2Bytes to 512kB
@@ -134,12 +183,11 @@ int main(int argc, char* argv[]) {
     int ret = 0;
     int portid = atoi(argv[5]);
     int num_queues = atoi(argv[6]); //self-defined parameter
-    int stqueues = 1; //self-defined parameter
+    int stqueues = num_queues; //self-defined parameter
     int numdescs = NUM_DESC_PER_RING; //self-defined parameter
     int buffsize = atoi(argv[7]); //self-defined parameter
     uint64_t prev_tsc, cur_tsc, diff_tsc; //measure latency
-    struct rte_mbuf *mb[NUM_TX_PKTS] = { NULL };
-    struct rte_mbuf *pkts[NUM_RX_PKTS] = { NULL };
+    // struct rte_mbuf *pkts[NUM_RX_PKTS] = { NULL };
     struct rte_mempool *mp;
     int numpkts = atoi(argv[8]);
     int cycles = atoi(argv[9]);
@@ -154,7 +202,8 @@ int main(int argc, char* argv[]) {
     int reg_val, loopback_en;
     int qbase, queueid, diag;
     struct rte_mbuf *nxtmb;
-    queueid = 0;
+
+    unsigned int num_lcores;
 
     ret = rte_eal_init(argc, argv);
     if (ret < 0)
@@ -179,18 +228,41 @@ int main(int argc, char* argv[]) {
     mp = rte_mempool_lookup(pinfo[portid].mem_pool);
 
     if (mp == NULL) {
-        printf("Could not find mempool with name %s\n",
-        pinfo[portid].mem_pool);
+        printf("Could not find mempool with name %s\n", pinfo[portid].mem_pool);
         // rte_spinlock_unlock(&pinfo[portid].port_update_lock);
         return -1;
     }
 
+    num_lcores = rte_lcore_count();
+    int** lcore_q_map = (int**)malloc(num_lcores * sizeof(int*));  //index 0: core id, rest: queueid
+    int q_per_core = num_queues / num_lcores;
+    int q_count = pinfo[portid].queue_base;
+    if (num_queues % num_lcores != 0) {
+        q_per_core++;
+    } 
+    int idx = 0;
+    RTE_LCORE_FOREACH(i) {
+        int* pp = (int*)malloc(sizeof(int)*(q_per_core+1));
+        pp[q_per_core] = -1;
+        lcore_q_map[i] = pp;
+    }
+    for (int x = 0 ; x < q_per_core ; x++) {
+        for (idx = 0 ; idx < num_lcores ; idx++) {
+            if (q_count < (num_queues+pinfo[portid].queue_base)) {
+                lcore_q_map[idx][x] = q_count;
+                q_count++;
+            } else {
+                lcore_q_map[idx][x] = -1;
+            }
+        }
+    }
     qbase = pinfo[portid].queue_base;
+    queueid = 0;
     int count = 0;
     int tmp = numpkts, nb_pkts, tmp_pkts, count_pkt;
     // int tmp = 100, nb_pkts, tmp_pkts, count_pkt;
     // int max_tx_retry;
-    int fd;
+    // int fd;
     // fd = open("output.txt", O_RDWR | O_CREAT | O_TRUNC | O_SYNC, 0666);
     int r_size = 0;
     int size, total_size = 0;
@@ -227,62 +299,75 @@ int main(int argc, char* argv[]) {
     PciWrite(user_bar_idx, C2H_PACKET_COUNT_REG, numpkts, portid);
     PciWrite(user_bar_idx, C2H_ST_LEN_REG, max_completion_size, portid);
     PciWrite(user_bar_idx, CYCLES_PER_PKT, cycles, portid);
+    PciWrite(user_bar_idx, C2H_NUM_QUEUES, num_queues, portid);
     /* Start the C2H Engine */
-    reg_val |= ST_C2H_START_VAL;
-    PciWrite(user_bar_idx, C2H_CONTROL_REG, reg_val, portid);
+    // reg_val |= ST_C2H_START_VAL;
+    // PciWrite(user_bar_idx, C2H_CONTROL_REG, reg_val, portid);
     reg_val = PciRead(user_bar_idx, C2H_PACKET_COUNT_REG, portid);
     printf("BAR-%d is the QDMA C2H number of packets:0x%x,\n", user_bar_idx, reg_val);
     reg_val = PciRead(user_bar_idx, CYCLES_PER_PKT, portid);
     printf("Cycles per packet is : %d\n", reg_val);
+    reg_val |= ST_C2H_START_VAL;
+    PciWrite(user_bar_idx, C2H_CONTROL_REG, reg_val, portid);
+
+    input_arg_t* temp = (input_arg_t*)malloc(sizeof(input_arg_t));
+    temp->core_to_q = lcore_q_map;
+    temp->numpkts = numpkts;
+    temp->portid = portid;
     prev_tsc = rte_rdtsc_precise();
-    while(recvpkts < numpkts){
-        // while (recvpkts < 100) {
-        count_pkt = 0;
-        if (tmp > NUM_RX_PKTS) {
-            nb_pkts = NUM_RX_PKTS;
-        } else {
-            nb_pkts = tmp;
-        }
-        max_rx_retry = RX_TX_MAX_RETRY;
-        /* try to receive RX_BURST_SZ packets */
-        // rte_pmd_qdma_dbg_qinfo(portid, 0);
-        nb_rx = rte_eth_rx_burst(portid, queueid, pkts, nb_pkts);
-        // if (nb_rx > 0) {
-            // rte_pmd_qdma_dbg_reg_info_dump(portid, 2, 0xb44);
-            // rte_pmd_qdma_dbg_qinfo(portid, 0);
-        // printf("recv_count: %d, total_recv_pkts: %d, intend to recv: %d\n", nb_rx, recvpkts, nb_pkts);
-        // }
-        recvpkts += nb_rx;
-        tmp -= nb_rx;
-        count_pkt += nb_rx;
-        tmp_pkts = nb_pkts;
-        while ((nb_rx < tmp_pkts) && max_rx_retry) {
-            // rte_delay_us(1);
-            tmp_pkts -= nb_rx;
-            nb_rx = rte_eth_rx_burst(portid, queueid, &pkts[count_pkt], tmp_pkts);
-            // if (nb_rx > 0) {
-            //     printf("recv_count: %d, total_recv_pkts: %d\n", nb_rx, recvpkts);
-            // }
-            recvpkts += nb_rx;
-            max_rx_retry--;
-            tmp -= nb_rx;
-            count_pkt += nb_rx;
-        }
-        for (i = 0; i < count_pkt; i++) {
-            // rte_delay_ms(1);
-            struct rte_mbuf *mb = pkts[i];
-            // while (mb != NULL) {
-            //     ret += write(fd, rte_pktmbuf_mtod(mb, void*),rte_pktmbuf_data_len(mb));
-            //     printf("Number of bytes send: %d\n", ret);
-            //     nxtmb = mb->next;
-            //     mb = nxtmb;
-            // }
-            // mb = pkts[i];
-            rte_pktmbuf_free(mb);
-            // count += ret;
-            // ret = 0;
-        }
-    }
+    // RTE_LCORE_FOREACH(i) { //for each core, launch a recv thread
+    rte_eal_mp_remote_launch((lcore_function_t*)&recv_pkt_single_core, temp, CALL_MAIN);
+    rte_eal_mp_wait_lcore();
+    // }
+    // while(recvpkts < numpkts){
+    //     // while (recvpkts < 100) {
+    //     count_pkt = 0;
+    //     if (tmp > NUM_RX_PKTS) {
+    //         nb_pkts = NUM_RX_PKTS;
+    //     } else {
+    //         nb_pkts = tmp;
+    //     }
+    //     max_rx_retry = RX_TX_MAX_RETRY;
+    //     /* try to receive RX_BURST_SZ packets */
+    //     // rte_pmd_qdma_dbg_qinfo(portid, 0);
+    //     nb_rx = rte_eth_rx_burst(portid, queueid, pkts, nb_pkts);
+    //     if (nb_rx > 0) {
+    //         // rte_pmd_qdma_dbg_reg_info_dump(portid, 2, 0xb44);
+    //         // rte_pmd_qdma_dbg_qinfo(portid, 0);
+    //         printf("recv_count: %d, total_recv_pkts: %d, intend to recv: %d, queueid: %d\n", nb_rx, recvpkts, nb_pkts, queueid);
+    //     }
+    //     recvpkts += nb_rx;
+    //     tmp -= nb_rx;
+    //     count_pkt += nb_rx;
+    //     tmp_pkts = nb_pkts;
+    //     // while ((nb_rx < tmp_pkts) && max_rx_retry) {
+    //     //     // rte_delay_us(1);
+    //     //     tmp_pkts -= nb_rx;
+    //     //     nb_rx = rte_eth_rx_burst(portid, queueid, &pkts[count_pkt], tmp_pkts);
+    //     //     if (nb_rx > 0) {
+    //     //         printf("recv_count: %d, total_recv_pkts: %d, queue_id: %d\n", nb_rx, recvpkts, queueid);
+    //     //     }
+    //     //     recvpkts += nb_rx;
+    //     //     max_rx_retry--;
+    //     //     tmp -= nb_rx;
+    //     //     count_pkt += nb_rx;
+    //     // }
+    //     for (i = 0; i < count_pkt; i++) {
+    //         // rte_delay_ms(1);
+    //         struct rte_mbuf *mb = pkts[i];
+    //         // while (mb != NULL) {
+    //         //     ret += write(fd, rte_pktmbuf_mtod(mb, void*),rte_pktmbuf_data_len(mb));
+    //         //     printf("Number of bytes send: %d\n", ret);
+    //         //     nxtmb = mb->next;
+    //         //     mb = nxtmb;
+    //         // }
+    //         // mb = pkts[i];
+    //         rte_pktmbuf_free(mb);
+    //         // count += ret;
+    //         // ret = 0;
+    //     }
+    //     queueid = (queueid + 1) % num_queues;
+    // }
     /* Stop the C2H Engine */
     // if (!loopback_en) {
     //     reg_val = PciRead(user_bar_idx, C2H_CONTROL_REG, portid);
@@ -294,16 +379,16 @@ int main(int argc, char* argv[]) {
     diff_tsc = cur_tsc - prev_tsc;
     printf("diff_tsc: %ld\n", diff_tsc);
     tot_time = diff_tsc*1.0 / rte_get_tsc_hz();
-    printf("DMA received number of packets: %u, on queue-id:%d\n",recvpkts, queueid);
+    printf("DMA received number of packets: %u\n",numpkts);
     rte_spinlock_unlock(&pinfo[portid].port_update_lock);
 
-    pkts_per_second = ((double)recvpkts / tot_time);
+    pkts_per_second = ((double)numpkts / tot_time);
 
     /* Calculate average throughput (Gbps) in bits per second */
     throughput_gbps = (pinfo[portid].buff_size * 8.0/ (1000000000.0)) * pkts_per_second;
 
     printf("Throughput Gbps %lf ", throughput_gbps);
-    printf("Number of bytes: %d ", pinfo[portid].buff_size * recvpkts);
+    printf("Number of bytes: %d ", pinfo[portid].buff_size * numpkts);
     printf("total latency: %lf\n", tot_time);
     // rte_pmd_qdma_dbg_qinfo(portid, 0);
     // close(fd);
@@ -314,5 +399,12 @@ int main(int argc, char* argv[]) {
 
     if (mp != NULL)
         rte_mempool_free(mp);
+    rte_eal_cleanup();
+
+    for (idx = 0 ; idx < num_lcores ; idx++) {
+        free(lcore_q_map[idx]);
+    }
+    free(lcore_q_map);
+    free(temp);
 }
 

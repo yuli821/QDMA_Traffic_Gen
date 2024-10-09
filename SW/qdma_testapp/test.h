@@ -3,7 +3,7 @@
 
 #define PORT_0 0
 
-#define NUM_DESC_PER_RING 1024
+#define NUM_DESC_PER_RING 2048
 
 #define NUM_RX_PKTS (NUM_DESC_PER_RING-2)
 //#define NUM_RX_PKTS 32
@@ -28,6 +28,7 @@
 #define H2C_CONTROL_REG    0xC
 #define H2C_STATUS_REG    0x10
 #define CYCLES_PER_PKT    0x1C
+#define C2H_NUM_QUEUES    0x28
 #define C2H_PACKET_COUNT_REG    0x20
 #define C2H_STATUS_REG                    0x18
 #define C2H_STREAM_MARKER_PKT_GEN_VAL     0x22
