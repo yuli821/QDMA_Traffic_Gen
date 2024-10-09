@@ -103,7 +103,7 @@ module user_control
     input axi_st_c2h_ready,
     input [10:0] c2h_qid,
     output [31:0] c2h_control,
-    output reg [15:0] c2h_num_pkt,
+    output reg [31:0] c2h_num_pkt,
     output reg [10:0] c2h_st_qid,
     output clr_h2c_match,
     output reg [15:0] c2h_st_len,
@@ -118,7 +118,7 @@ module user_control
     output reg [255:0] wb_dat,
     output reg [TM_DSC_BITS-1:0] credit_out,
     output reg       credit_updt,
-    output reg [TM_DSC_BITS-1:0] credit_needed,
+    output reg [31:0] credit_needed,
     output reg [TM_DSC_BITS-1:0] credit_perpkt_in,
     output wire [15:0] buf_count,
     output wire h2c_dsc_bypass,
@@ -310,7 +310,7 @@ module user_control
          cycles_per_pkt <= 32'h0;
          wb_dat[255:0] <= 0;
          cmpt_size[31:0] <= 0;
-         c2h_num_pkt <= 16'h1;
+         c2h_num_pkt <= 32'h1;
          perf_ctl <= 0;
       //	 perf_ctl <= 5'b11001;
          scratch_reg1 <=0;
@@ -334,7 +334,7 @@ module user_control
             32'h08 : control_reg_c2h<= m_axil_wdata[31:0];
             32'h0C : control_reg_h2c<= m_axil_wdata[31:0];
             32'h1C : cycles_per_pkt<= m_axil_wdata[31:0];
-            32'h20 : c2h_num_pkt  <= m_axil_wdata[15:0];
+            32'h20 : c2h_num_pkt  <= m_axil_wdata[31:0];
             32'h24 : pfch_byp_tag_reg   <= m_axil_wdata[31:0];
             32'h28 : c2h_num_queue <= m_axil_wdata[10:0]; //number of queues
             32'h30 : wb_dat[31:0]   <= m_axil_wdata[31:0];
@@ -442,7 +442,7 @@ module user_control
 	32'h14 : m_axil_rdata  = h2c_count;
 	32'h18 : m_axil_rdata  = {32'h0 | c2h_status};
    32'h1C : m_axil_rdata  = cycles_per_pkt[31:0];
-	32'h20 : m_axil_rdata  = (32'h0 | c2h_num_pkt[15:0]);
+	32'h20 : m_axil_rdata  = c2h_num_pkt[31:0];
    32'h28 : m_axil_rdata = {32'h0 | c2h_num_queue};
 	32'h30 : m_axil_rdata  = wb_dat[31:0];
 	32'h34 : m_axil_rdata  = wb_dat[63:32];
@@ -586,10 +586,11 @@ module user_control
    localparam [1:0] 
      SM_IDLE = 2'b00,
      SM_TFR  = 2'b01,
+     SM_TEMP = 2'b11,
      SM_END  = 2'b10;
    reg [1:0] sm_crdt;
    
-   reg [TM_DSC_BITS-1:0]  credit_sent;
+   reg [31:0]  credit_sent;
    reg start_c2h_pls_d1;
    reg end_c2h_pls_d1;
    wire wr_credit_en;
@@ -624,6 +625,7 @@ module user_control
 
    assign wr_credit_qid = credit_updt ? c2h_qid : tm_dsc_sts_qid_d1;
    assign rd_credit_qid = tm_update ? tm_dsc_sts_qid : c2h_qid;
+   // assign rd_credit_qid = c2h_qid;
    
    xpm_memory_sdpram # 
      (
@@ -709,35 +711,47 @@ module user_control
 	case (sm_crdt)
 	  SM_IDLE : begin  // 0
 	      if (start_c2h_pls_d1) begin
-		      credit_updt <= 1'b1;
 		      if (rd_credit_out >= credit_needed) begin
 		         credit_out <= credit_needed;
+               credit_updt <= 1'b1;
+               credit_sent <= credit_needed;
 		         sm_crdt <= SM_END;
 		      end
 		      else begin
-		         credit_out <= rd_credit_out;
+               credit_updt <= 1'b0;
+               credit_out <= 0;
+               credit_sent <= 0;
 		         sm_crdt <= SM_TFR;
-		         credit_sent <= rd_credit_out;
 		      end
 	     end
 	  end
 	  SM_TFR : begin // 1
-	     if (tm_vld_out_d2 & (rd_credit_out >= (credit_needed -credit_sent))) begin
+	   //   if (tm_vld_out_d2 & (rd_credit_out >= (credit_needed -credit_sent))) begin
+         if (rd_credit_out >= (credit_needed -credit_sent)) begin
             credit_updt <= 1'b1;
             credit_out  <= credit_needed - credit_sent;
             credit_sent <= credit_sent + (credit_needed - credit_sent);
             sm_crdt <= SM_END;
 	     end
-	     else if (tm_vld_out_d2 & (rd_credit_out > 0)) begin
+	   //   else if (tm_vld_out_d2 & (rd_credit_out > 0)) begin
+         else if (rd_credit_out > 0) begin
             credit_updt <= 1'b1;
             credit_out  <= rd_credit_out;
             credit_sent <= credit_sent + rd_credit_out;
-            sm_crdt <= SM_TFR;
+            sm_crdt <= SM_TEMP;
 	     end
 	     else
 		      credit_updt <= 1'b0;
-	     
 	  end
+     SM_TEMP : begin //2 cycles for updates to become 0 (rd_credit_out - credit_sent)
+      if (credit_updt == 1'b1) begin
+         credit_updt <= 1'b0;
+         sm_crdt <= SM_TEMP;
+      end else begin 
+         credit_updt <= 1'b0;
+         sm_crdt <= SM_TFR;
+      end
+     end
 	  SM_END : begin // 2
 	     sm_crdt <= SM_IDLE;
 	     credit_updt <= 1'b0;

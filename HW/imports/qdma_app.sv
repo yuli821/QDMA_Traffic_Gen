@@ -467,7 +467,7 @@ module qdma_app #(
   wire                                  out_axis_pld_tvalid;
   wire                                  out_axis_pld_tready;
 
-  wire [15:0]   c2h_num_pkt;
+  wire [31:0]   c2h_num_pkt;
   wire [10:0]   c2h_st_qid;
   wire [15:0]   c2h_st_len;
   wire [31:0]   h2c_count;
@@ -482,7 +482,7 @@ module qdma_app #(
   wire [10:0] c2h_qid;
 
   wire [TM_DSC_BITS-1:0]   credit_out;
-  wire [TM_DSC_BITS-1:0]   credit_needed;
+  wire [31:0]   credit_needed;
   wire [TM_DSC_BITS-1:0]   credit_perpkt_in;
   wire                     credit_updt;
   wire [15:0]              buf_count;
@@ -522,11 +522,12 @@ module qdma_app #(
       start_c2h_d1 <= start_c2h_d;
     end
    end
-  assign dsc_crdt_in_vld   = (start_c2h_d & ~start_c2h_d1) & (c2h_dsc_bypass == 2'b10);
-  assign dsc_crdt_in_dir   = start_c2h_d;
-  assign dsc_crdt_in_fence = 1'b0;  // fix me
-  assign dsc_crdt_in_qid   = c2h_qid;
-  assign dsc_crdt_in_crdt  = credit_needed;
+
+  // assign dsc_crdt_in_vld   = (start_c2h_d & ~start_c2h_d1) & (c2h_dsc_bypass == 2'b10);
+  // assign dsc_crdt_in_dir   = start_c2h_d;
+  // assign dsc_crdt_in_fence = 1'b0;  // fix me
+  // assign dsc_crdt_in_qid   = c2h_qid;
+  // assign dsc_crdt_in_crdt  = credit_needed;
 
   assign c2h_byp_in_st_sim_at = c2h_byp_in_st_csh_at;
   user_control

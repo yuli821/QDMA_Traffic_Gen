@@ -88,7 +88,7 @@ module axi_st_module
     input [31:0] c2h_control,
     input clr_h2c_match,
     input [15:0] c2h_st_len,
-    input [15:0] c2h_num_pkt,
+    input [31:0] c2h_num_pkt,
     input [31:0] cmpt_size,
     input [255:0] wb_dat,
     input   [C_DATA_WIDTH-1 :0]    m_axis_h2c_tdata /* synthesis syn_keep = 1 */,
@@ -107,7 +107,7 @@ module axi_st_module
     input [10:0]    c2h_num_queue,
     
     output [C_DATA_WIDTH-1 :0]     s_axis_c2h_tdata /* synthesis syn_keep = 1 */,  
-    output [C_DATA_WIDTH/8-1:0]       s_axis_c2h_dpar  /* synthesis syn_keep = 1 */, 
+    // output [C_DATA_WIDTH/8-1:0]       s_axis_c2h_dpar  /* synthesis syn_keep = 1 */, 
     output [CRC_WIDTH-1 :0]        s_axis_c2h_tcrc /* synthesis syn_keep = 1 */,  
     output                         s_axis_c2h_ctrl_marker /* synthesis syn_keep = 1 */,
     output [15:0]                  s_axis_c2h_ctrl_len /* synthesis syn_keep = 1 */,
@@ -130,7 +130,7 @@ module axi_st_module
     output [2:0]                   s_axis_c2h_cmpt_ctrl_err_idx,
     input                          s_axis_c2h_cmpt_tready,
     input [TM_DSC_BITS-1:0]        credit_in,
-    input [TM_DSC_BITS-1:0]        credit_needed,
+    input [31:0]        credit_needed,
     input [TM_DSC_BITS-1:0]        credit_perpkt_in,
     input                          credit_updt,
     input [15:0]                   buf_count,
@@ -143,20 +143,19 @@ module axi_st_module
     output logic                   h2c_crc_match,
     output                         c2h_end,
     output reg [10:0]              h2c_qid,
-    output c2h_qid
+    output [10:0] c2h_qid
     );
 
    logic [CRC_WIDTH-1 : 0]     gen_h2c_tcrc;
    logic 		       s_axis_c2h_tlast_nn1;
    logic 		       wb_sm;
-   logic [15:0] 		       cmpt_count;
+   logic [31:0] 		       cmpt_count;
    logic 		       c2h_st_d1;
    logic 		       start_c2h;
    logic 		       start_imm;
-   logic [15:0] 	       cmpt_pkt_cnt;
+   logic [31:0] 	       cmpt_pkt_cnt;
    logic 		       cmpt_tvalid;
    logic 		       start_cmpt;
-
   //  logic [10:0]   c2h_qid;
 
 //   logic  m_axis_h2c_tready;
@@ -249,7 +248,7 @@ traffic_gen_c2h(
     .qid(c2h_st_qid),
     .num_queue(c2h_num_queue),
     .rx_valid(s_axis_c2h_tvalid),
-    .rx_ben(s_axis_c2h_dpar),
+    // .rx_ben(s_axis_c2h_dpar),
     .rx_data(s_axis_c2h_tdata),
     .rx_last(s_axis_c2h_tlast),
     .rx_end(c2h_end),
@@ -351,7 +350,7 @@ end
 
 always @(posedge axi_aclk ) begin
   if (~axi_aresetn) begin
-    cmpt_count <= 16'b0;
+    cmpt_count <= 32'b0;
     start_cmpt <= 0;
     wb_sm <= SM_IDL;
     cmpt_tvalid <= 0;

@@ -9,27 +9,30 @@ default clocking tb_clk @(negedge clk); endclocking
 
 localparam len=512;
 localparam ben=len/8;
-localparam cycles_per_second = 25000-1060;
+// localparam cycles_per_second = 25000-1060;
 localparam TM_DSC_BITS = 16;
 localparam max_frame = 4096;
 
 logic resetn;
 logic [31:0] ctrlreg;
 logic err1, err2, rx_valid, rx_ready;
-logic [ben-1:0] rx_ben;
+// logic [ben-1:0] rx_ben;
 logic [len-1:0] rx_data;
 logic rx_last;
 logic [31:0] cycles;
-logic [15:0] num_pkt;
+logic [31:0] num_pkt;
 logic [TM_DSC_BITS-1:0] credit_in, credit_perpkt_in, credit_needed;
 logic credit_updt;
 logic rx_end;
 logic [15:0] txr_size;
 logic [10:0] qid, num_queue, rx_qid;
-assign txr_size = 8192;
-assign cycles = 256;
+logic [31:0] cycles_needed;
+assign txr_size = 256;
+assign cycles = 10;
 assign qid = 0;
 assign num_queue = 11'h4;
+assign num_pkt = 32'h0008;
+assign cycles_needed  = (txr_size/64 > cycles ? txr_size/64 : cycles) * num_pkt;
 
 traffic_gen #(.RX_LEN(len),.MAX_ETH_FRAME(max_frame)) dut(
     .axi_aclk(clk),
@@ -46,7 +49,7 @@ traffic_gen #(.RX_LEN(len),.MAX_ETH_FRAME(max_frame)) dut(
     .rx_ready(rx_ready),
     .cycles_per_pkt(cycles),
     .rx_valid(rx_valid),
-    .rx_ben(rx_ben),
+    // .rx_ben(rx_ben),
     .rx_data(rx_data),
     .rx_last(rx_last),
     .rx_end(rx_end),
@@ -59,34 +62,34 @@ task test_generator();
     ##2
     ctrlreg <= 32'h0;
     rx_ready <= 1'b1;
-    num_pkt = 16'h0800;//1024
-    credit_in <= 1024;
-    credit_needed <= ((txr_size < max_frame) ? 1 : txr_size[15:12]+|txr_size[11:0]) * num_pkt[10:0];
-    credit_perpkt_in <= (txr_size < max_frame) ? 1 : txr_size[15:12]+|txr_size[11:0];
+    credit_in <= num_pkt;
+    credit_needed <= num_pkt;
+    // credit_perpkt_in <= (txr_size < max_frame) ? 1 : txr_size[15:12]+|txr_size[11:0];
     credit_updt <= 1'b1;
-    ##3;
+    ##1
     credit_updt <= 1'b0;
-    ##50;
+    ##4
     rx_ready <= 1'b0;
-    ##10;
+    ##3
     rx_ready <= 1'b1;
-    ##72000;
-    credit_in <= 1024;
-    credit_updt<= 1'b1;
-    ##1;
-    credit_updt <= 1'b0;
-    ##cycles_per_second;
+    // ##72000;
+    // credit_in <= 1024;
+    // credit_updt<= 1'b1;
+    // ##1;
+    // credit_updt <= 1'b0;
+    // ##cycles_per_second;
     // $display("One second pass\n");
     // ctrlreg <= 32'h0;
     // rx_ready <= 1'b0;
-    ##1;
+    ##cycles_needed
+    $display("Simulation ends");
 endtask
 
 initial begin 
     resetn <= 1'b0;
-    ##5;
+    ##5
     resetn <= 1'b1;
-    ##1; 
+    ##1
     test_generator();
 end
 
