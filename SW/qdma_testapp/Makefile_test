@@ -39,6 +39,7 @@ CFLAGS += -DDPDK=1
 
 # Add flag to allow experimental API as qdma_testapp uses rte_ethdev_set_ptype API
 CFLAGS += -DALLOW_EXPERIMENTAL_API
+CFLAGS += -DRTE_LIBRTE_ETHDEV_DEBUG
 
 PC_FILE := $(shell $(PKGCONF) --path libdpdk 2>/dev/null)
 CFLAGS += -O3 $(shell $(PKGCONF) --cflags libdpdk)

@@ -105,6 +105,18 @@ module axi_st_module
 
     input [31:0]    cycles_per_pkt,
     input [10:0]    c2h_num_queue,
+
+    input         tm_dsc_sts_vld,
+    input         tm_dsc_sts_byp,
+    input         tm_dsc_sts_qen,
+    input         tm_dsc_sts_dir,
+    input         tm_dsc_sts_mm,
+    input         tm_dsc_sts_error,
+    input [10:0]  tm_dsc_sts_qid,
+    input [15:0]  tm_dsc_sts_avl,
+    input         tm_dsc_sts_qinv,
+    input 	  tm_dsc_sts_irq_arm,
+    output        tm_dsc_sts_rdy,
     
     output [C_DATA_WIDTH-1 :0]     s_axis_c2h_tdata /* synthesis syn_keep = 1 */,  
     // output [C_DATA_WIDTH/8-1:0]       s_axis_c2h_dpar  /* synthesis syn_keep = 1 */, 
@@ -143,7 +155,9 @@ module axi_st_module
     output logic                   h2c_crc_match,
     output                         c2h_end,
     output reg [10:0]              h2c_qid,
-    output [10:0] c2h_qid
+    input [10:0] c2h_qid,
+    output [5:0] hash_val,
+    input c2h_perform
     );
 
    logic [CRC_WIDTH-1 : 0]     gen_h2c_tcrc;
@@ -239,10 +253,10 @@ traffic_gen_c2h(
     .control_reg(c2h_control),
     .txr_size(s_axis_c2h_ctrl_len),
     .num_pkt(c2h_num_pkt),
-    .credit_in(credit_in),
-    .credit_updt(credit_updt),
-    .credit_perpkt_in(credit_perpkt_in),
-    .credit_needed(credit_needed),
+    // .credit_in(credit_in),
+    // .credit_updt(credit_updt),
+    // .credit_perpkt_in(credit_perpkt_in),
+    // .credit_needed(credit_needed),
     .rx_ready(s_axis_c2h_tready),
     .cycles_per_pkt(cycles_per_pkt),
     .qid(c2h_st_qid),
@@ -252,7 +266,21 @@ traffic_gen_c2h(
     .rx_data(s_axis_c2h_tdata),
     .rx_last(s_axis_c2h_tlast),
     .rx_end(c2h_end),
-    .rx_qid(c2h_qid)
+    .hash_val(hash_val),
+    .rx_qid(c2h_qid),
+    .c2h_perform(c2h_perform),
+
+    .tm_dsc_sts_vld    (tm_dsc_sts_vld   ),
+    .tm_dsc_sts_qen    (tm_dsc_sts_qen   ),
+    .tm_dsc_sts_byp    (tm_dsc_sts_byp   ),
+    .tm_dsc_sts_dir    (tm_dsc_sts_dir   ),
+    .tm_dsc_sts_mm     (tm_dsc_sts_mm    ),
+    .tm_dsc_sts_error  (tm_dsc_sts_error ),
+    .tm_dsc_sts_qid    (tm_dsc_sts_qid   ),
+    .tm_dsc_sts_avl    (tm_dsc_sts_avl   ),
+    .tm_dsc_sts_qinv   (tm_dsc_sts_qinv  ),
+    .tm_dsc_sts_irq_arm(tm_dsc_sts_irq_arm),
+    .tm_dsc_sts_rdy    (tm_dsc_sts_rdy)
 );
 
   ST_h2c #(
@@ -337,20 +365,20 @@ always @(posedge axi_aclk ) begin
 	  start_imm <= c2h_control[2] ? 1'b1 : s_axis_c2h_cmpt_tready ? 1'b0 : start_imm;
 end
 
-always @(posedge axi_aclk ) begin
-  if (~axi_aresetn) begin
-	  s_axis_c2h_tlast_nn1 <= 0;
-	  c2h_st_d1 <= 0;
-  end
-  else begin
-	  s_axis_c2h_tlast_nn1 <= s_axis_c2h_tlast;
-	  c2h_st_d1 <= c2h_control[1];
-  end
-end
+// always @(posedge axi_aclk ) begin
+//   if (~axi_aresetn) begin
+// 	  s_axis_c2h_tlast_nn1 <= 0;
+// 	  c2h_st_d1 <= 0;
+//   end
+//   else begin
+// 	  s_axis_c2h_tlast_nn1 <= s_axis_c2h_tlast;
+// 	  c2h_st_d1 <= c2h_control[1];
+//   end
+// end
 
 always @(posedge axi_aclk ) begin
   if (~axi_aresetn) begin
-    cmpt_count <= 32'b0;
+    // cmpt_count <= 32'b0;
     start_cmpt <= 0;
     wb_sm <= SM_IDL;
     cmpt_tvalid <= 0;
@@ -358,6 +386,7 @@ always @(posedge axi_aclk ) begin
   else 
 	  case (wb_sm)
 	    SM_IDL : begin
+        // cmpt_tvalid <= 0;
         if ((start_c2h  | start_cmpt) ) begin
           wb_sm <= SM_S1;
           start_cmpt <= 1;
@@ -367,11 +396,13 @@ always @(posedge axi_aclk ) begin
 	     
 	    end
 	    SM_S1 : 
-        if (start_cmpt & s_axis_c2h_cmpt_tready & (cmpt_count < c2h_num_pkt)) begin
-        // if (start_cmpt & s_axis_c2h_cmpt_tready & ~end_c2h) begin
+        // if (start_cmpt & s_axis_c2h_cmpt_tready & (cmpt_count < c2h_num_pkt)) begin
+        if (start_cmpt & s_axis_c2h_cmpt_tready) begin
           cmpt_tvalid <= 0;
-          cmpt_count <= (cmpt_count == (c2h_num_pkt-1)) ? 16'b0 : cmpt_count + 16'b1;
-          start_cmpt <= (cmpt_count == (c2h_num_pkt-1)) ? 0 : 1;
+          // cmpt_count <= (cmpt_count == (c2h_num_pkt-1)) ? 16'b0 : cmpt_count + 16'b1;
+          // start_cmpt <= (cmpt_count == (c2h_num_pkt-1)) ? 0 : 1;
+          // cmpt_count <= (c2h_perform) ? cmpt_count + 32'b1 : 32'h0;
+          start_cmpt <= (c2h_perform) ? 1 : 0;
           wb_sm <= SM_IDL;
         end
         // if (start_cmpt & s_axis_c2h_cmpt_tready) begin
@@ -402,6 +433,61 @@ end
    wire cmpt_user_fmt;
    assign cmpt_user_fmt = cmpt_size[2];  
 
+  wire fifo_full;
+  logic rd_en, rd_en_d1;
+  wire [10:0] rd_out_qid;
+  assign rd_en = cmpt_tvalid & s_axis_c2h_cmpt_tready;
+  assign wr_en = s_axis_c2h_tlast;
+  // assign rd_en = cmpt_and & (!cmpt_and_d1);
+  always_ff @(axi_aclk) begin 
+    if (!axi_aresetn) begin 
+      rd_en_d1 <= 1'b0;
+    end
+    else begin 
+      rd_en_d1 <= rd_en;
+    end
+  end
+
+   xpm_fifo_sync # 
+    (
+      .FIFO_MEMORY_TYPE     ("block"), //string; "auto", "block", "distributed", or "ultra";
+      .ECC_MODE             ("no_ecc"), //string; "no_ecc" or "en_ecc";
+      .FIFO_WRITE_DEPTH     (128), //positive integer
+      .WRITE_DATA_WIDTH     (11), //positive integer
+      .WR_DATA_COUNT_WIDTH  (7), //positive integer
+      .PROG_FULL_THRESH     (10), //positive integer
+      .FULL_RESET_VALUE     (0), //positive integer; 0 or 1
+      .READ_MODE            ("fwft"), //string; "std" or "fwft";
+      .FIFO_READ_LATENCY    (1), //positive integer;
+      .READ_DATA_WIDTH      (11), //positive integer
+      .RD_DATA_COUNT_WIDTH  (7), //positive integer
+      .PROG_EMPTY_THRESH    (10), //positive integer
+      .DOUT_RESET_VALUE     ("0"), //string
+      .WAKEUP_TIME          (0) //positive integer; 0 or 2;
+    ) cmpt_qid_fifo (
+  .sleep           (1'b0),
+	.rst             (~axi_aresetn),
+	.wr_clk          (axi_aclk),
+	.wr_en           (wr_en),
+	.din             (c2h_qid),
+	.full            (fifo_full),
+	.prog_full       (),
+	.wr_data_count   (),
+	.overflow        (),
+	.wr_rst_busy     (),
+	.rd_en           (rd_en),
+	.dout            (rd_out_qid),
+	.empty           (),
+	.prog_empty      (),
+	.rd_data_count   (),
+	.underflow       (),
+	.rd_rst_busy     (),
+	.injectsbiterr   (1'b0),
+	.injectdbiterr   (1'b0),
+	.sbiterr         (),
+	.dbiterr         ()
+    );
+
    // write back data format
    // Standart format
    // 0 : data format. 0 = standard format, 1 = user defined.
@@ -415,7 +501,7 @@ end
 
    assign s_axis_c2h_cmpt_tvalid = start_imm | cmpt_tvalid;
 
-   assign s_axis_c2h_cmpt_ctrl_qid = c2h_qid;
+   assign s_axis_c2h_cmpt_ctrl_qid = rd_out_qid;
 //   assign s_axis_c2h_cmpt_ctrl_cmpt_type = cmpt_size[13:12];
    assign s_axis_c2h_cmpt_ctrl_cmpt_type = start_imm ? 2'b00 : cmpt_size[12] ? 2'b01 : 2'b11;
    assign s_axis_c2h_cmpt_ctrl_wait_pld_pkt_id = cmpt_pkt_cnt[15:0];

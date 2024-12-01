@@ -101,8 +101,8 @@ module user_control
     input axi_st_h2c_ready,
     input axi_st_c2h_valid,
     input axi_st_c2h_ready,
-    input [10:0] c2h_qid,
-    output [31:0] c2h_control,
+   //  input [10:0] c2h_qid,
+    output reg [31:0] c2h_control,
     output reg [31:0] c2h_num_pkt,
     output reg [10:0] c2h_st_qid,
     output clr_h2c_match,
@@ -151,22 +151,26 @@ module user_control
     output [1:0]  c2h_st_at,
     output [6:0]  pfch_byp_tag,
     output [10:0] pfch_byp_tag_qid,
-    input         tm_dsc_sts_vld,
-    input         tm_dsc_sts_byp,
-    input         tm_dsc_sts_qen,
-    input         tm_dsc_sts_dir,
-    input         tm_dsc_sts_mm,
-    input         tm_dsc_sts_error,
-    input [10:0]  tm_dsc_sts_qid,
-    input [15:0]  tm_dsc_sts_avl,
-    input         tm_dsc_sts_qinv,
-    input 	  tm_dsc_sts_irq_arm,
-    output        tm_dsc_sts_rdy,
+   //  input         tm_dsc_sts_vld,
+   //  input         tm_dsc_sts_byp,
+   //  input         tm_dsc_sts_qen,
+   //  input         tm_dsc_sts_dir,
+   //  input         tm_dsc_sts_mm,
+   //  input         tm_dsc_sts_error,
+   //  input [10:0]  tm_dsc_sts_qid,
+   //  input [15:0]  tm_dsc_sts_avl,
+   //  input         tm_dsc_sts_qinv,
+   //  input 	  tm_dsc_sts_irq_arm,
+   //  output        tm_dsc_sts_rdy,
     output reg [31:0]  single_bit_err_inject_reg,
     output reg [31:0]  double_bit_err_inject_reg,
 
     output reg [31:0] cycles_per_pkt,
-    output reg [10:0] c2h_num_queue
+    output reg [10:0] c2h_num_queue,
+
+    output [10:0] c2h_qid,
+    input [5:0] hash_val,
+    output reg c2h_perform
     );
 
    reg [31:0] 	       control_reg_h2c;
@@ -186,6 +190,9 @@ module user_control
    wire         end_c2h;
    reg          end_c2h_d1;
    wire         end_c2h_pls;
+   wire         c2h_perf_enable;
+   reg          c2h_perf_enable_d1;
+   wire         c2h_perf_enable_pls;
    reg [63:0] 	       data_count;
    reg [63:0] 	       valid_count;
    reg [15:0] 	       c2h_st_buffsz;
@@ -193,8 +200,8 @@ module user_control
    reg 	     tm_vld_out;
    reg 	     tm_vld_out_d1;
    reg 	     tm_vld_out_d2;
-   reg [7:0] axis_pkt_drop;
-   reg [7:0] axis_pkt_accept;
+   reg [31:0] axis_pkt_drop;
+   reg [31:0] axis_pkt_accept;
    reg [5:0] dsc_bypass;
    reg [19:0] usr_irq;
    reg        usr_irq_d;
@@ -215,7 +222,8 @@ module user_control
    reg [31:0] pfch_byp_tag_reg;
    
    // reg [31:0] c2h_num_queue;
-
+   reg [31:0] rss_indir_table [128];
+   assign c2h_qid = rss_indir_table[hash_val];
    // Interpreting request on the axilite master interface
    wire [31:0] wr_addr;
    wire [31:0] rd_addr;
@@ -299,7 +307,7 @@ module user_control
    // address 0x009C : Multiple user interrupt reg 
    // address 0x00A0 : DMA Control
    // address 0x00A4 : VMD messge read
-   wire c2h_perform;
+   // reg c2h_perform;
    
    always @(posedge axi_aclk) begin
       if (!axi_aresetn) begin
@@ -326,43 +334,49 @@ module user_control
          single_bit_err_inject_reg <= 32'h0;
          double_bit_err_inject_reg <= 32'h0;
          c2h_num_queue <= 32'b1;
+         for (int i = 0 ; i < 128 ; i= i+1) 
+            rss_indir_table[i] <= 0;
       end
       else if (m_axil_wvalid && m_axil_wready ) begin
-         case (wr_addr)
-            32'h00 : c2h_st_qid     <= m_axil_wdata[10:0]; //base qid
-            32'h04 : c2h_st_len     <= m_axil_wdata[15:0];
-            32'h08 : control_reg_c2h<= m_axil_wdata[31:0];
-            32'h0C : control_reg_h2c<= m_axil_wdata[31:0];
-            32'h1C : cycles_per_pkt<= m_axil_wdata[31:0];
-            32'h20 : c2h_num_pkt  <= m_axil_wdata[31:0];
-            32'h24 : pfch_byp_tag_reg   <= m_axil_wdata[31:0];
-            32'h28 : c2h_num_queue <= m_axil_wdata[10:0]; //number of queues
-            32'h30 : wb_dat[31:0]   <= m_axil_wdata[31:0];
-            32'h34 : wb_dat[63:32]  <= m_axil_wdata[31:0];
-            32'h38 : wb_dat[95:64]  <= m_axil_wdata[31:0];
-            32'h3C : wb_dat[127:96] <= m_axil_wdata[31:0];
-            32'h40 : wb_dat[159:128]<= m_axil_wdata[31:0];
-            32'h44 : wb_dat[191:160]<= m_axil_wdata[31:0];
-            32'h48 : wb_dat[223:192]<= m_axil_wdata[31:0];
-            32'h4C : wb_dat[255:224]<= m_axil_wdata[31:0];
-            32'h50 : cmpt_size[31:0]  <= m_axil_wdata[31:0];
-            32'h60 : scratch_reg1[31:0]  <= m_axil_wdata[31:0];
-            32'h64 : scratch_reg2[31:0]  <= m_axil_wdata[31:0];
-            32'h68 : single_bit_err_inject_reg[31:0] <= m_axil_wdata[31:0];
-            32'h6C : double_bit_err_inject_reg[31:0] <= m_axil_wdata[31:0];
-            32'h70 : perf_ctl[4:0]  <= m_axil_wdata[4:0];
-            32'h84 : c2h_st_buffsz  <= m_axil_wdata[15:0];
-            32'h90 : dsc_bypass[5:0]    <= m_axil_wdata[5:0];
-            32'h94 : usr_irq[19:0] <= m_axil_wdata[19:0];
-            32'h98 : usr_irq_msk[31:0] <= m_axil_wdata[31:0];
-            32'h9C : usr_irq_num[31:0] <= m_axil_wdata[31:0];
-            32'hA0 : gen_qdma_reset <= m_axil_wdata[0]; //Write 1 to reset, self clearing register
-            32'hFFFFFFFF: invalid_axilm_addr <= 1'b1;
-         endcase // case (m_axil_awaddr[15:0])
+         if (wr_addr >= 32'hA8 && wr_addr <= 32'h2A4) begin
+            rss_indir_table[(wr_addr - 32'hA8) >> 2] <= m_axil_wdata; //(wr_addr - A4)/4 is the index, program the indirection table
+         end else begin
+            case (wr_addr)
+               32'h00 : c2h_st_qid     <= m_axil_wdata[10:0]; //base qid
+               32'h04 : c2h_st_len     <= m_axil_wdata[15:0];
+               32'h08 : control_reg_c2h<= m_axil_wdata[31:0];
+               32'h0C : control_reg_h2c<= m_axil_wdata[31:0];
+               32'h1C : cycles_per_pkt<= m_axil_wdata[31:0];
+               32'h20 : c2h_num_pkt  <= m_axil_wdata[31:0];
+               32'h24 : pfch_byp_tag_reg   <= m_axil_wdata[31:0];
+               32'h28 : c2h_num_queue <= m_axil_wdata[10:0]; //number of queues
+               32'h30 : wb_dat[31:0]   <= m_axil_wdata[31:0];
+               32'h34 : wb_dat[63:32]  <= m_axil_wdata[31:0];
+               32'h38 : wb_dat[95:64]  <= m_axil_wdata[31:0];
+               32'h3C : wb_dat[127:96] <= m_axil_wdata[31:0];
+               32'h40 : wb_dat[159:128]<= m_axil_wdata[31:0];
+               32'h44 : wb_dat[191:160]<= m_axil_wdata[31:0];
+               32'h48 : wb_dat[223:192]<= m_axil_wdata[31:0];
+               32'h4C : wb_dat[255:224]<= m_axil_wdata[31:0];
+               32'h50 : cmpt_size[31:0]  <= m_axil_wdata[31:0];
+               32'h60 : scratch_reg1[31:0]  <= m_axil_wdata[31:0];
+               32'h64 : scratch_reg2[31:0]  <= m_axil_wdata[31:0];
+               32'h68 : single_bit_err_inject_reg[31:0] <= m_axil_wdata[31:0];
+               32'h6C : double_bit_err_inject_reg[31:0] <= m_axil_wdata[31:0];
+               32'h70 : perf_ctl[4:0]  <= m_axil_wdata[4:0];
+               32'h84 : c2h_st_buffsz  <= m_axil_wdata[15:0];
+               32'h90 : dsc_bypass[5:0]    <= m_axil_wdata[5:0];
+               32'h94 : usr_irq[19:0] <= m_axil_wdata[19:0];
+               32'h98 : usr_irq_msk[31:0] <= m_axil_wdata[31:0];
+               32'h9C : usr_irq_num[31:0] <= m_axil_wdata[31:0];
+               32'hA0 : gen_qdma_reset <= m_axil_wdata[0]; //Write 1 to reset, self clearing register
+               32'hFFFFFFFF: invalid_axilm_addr <= 1'b1;
+            endcase // case (m_axil_awaddr[15:0])
+         end
       end // if (m_axil_wvalid && m_axil_wready )
       else begin
          // c2h_num_pkt <= 16'h0400;//0100 0000 0000 1024
-	 control_reg_c2h <= {control_reg_c2h[31:7], end_c2h_pls, control_reg_c2h[5:3], start_imm,start_c2h_pls,control_reg_c2h[0]};
+	 control_reg_c2h <= {control_reg_c2h[31:8], c2h_perf_enable_pls, end_c2h_pls, control_reg_c2h[5:3], start_imm,start_c2h_pls,control_reg_c2h[0]};
 	 control_reg_h2c <= {control_reg_h2c[31:1],clr_h2c_match};
 	 perf_ctl[4:0] <= {perf_ctl[4:3],perf_clear,perf_stop, (perf_ctl[0]& ~perf_stop)};
 	 usr_irq[16:0] <= {usr_irq[16:1],usr_irq_in_vld};
@@ -463,8 +477,8 @@ module user_control
 	32'h7C : m_axil_rdata  = valid_count[31:0];
 	32'h80 : m_axil_rdata  = valid_count[63:32];
 	32'h84 : m_axil_rdata  = c2h_st_buffsz[15:0];
-	32'h88 : m_axil_rdata  = {32'h0 | axis_pkt_drop[7:0]};
-	32'h8C : m_axil_rdata  = {32'h0 | axis_pkt_accept[7:0]};
+	32'h88 : m_axil_rdata  = {32'h0 | axis_pkt_drop[31:0]};
+	32'h8C : m_axil_rdata  = {32'h0 | axis_pkt_accept[31:0]};
 	32'h90 : m_axil_rdata  = {32'h0 | dsc_bypass[5:0]};
 	32'h94 : m_axil_rdata  = {32'h0 | usr_irq[16:0]};
 	32'h98 : m_axil_rdata  = {32'h0 | usr_irq_msk[31:0]};
@@ -492,30 +506,46 @@ module user_control
 	      control_h2c_clr <= 0;
 	      start_c2h_d1 <= 0;
          end_c2h_d1 <= 0;
+         c2h_perf_enable_d1 <= 0;
 	      perf_ctl_stp <= 0;
 	      perf_ctl_clr <= 0;
 	      start_imm_d1 <= 0;
+         c2h_perform <= 0;
+         c2h_control <= 0;
       end
       else begin
+         if (start_c2h_pls) begin 
+            c2h_perform <= 1'b1;
+         end
+         else if (end_c2h_pls) begin 
+            c2h_perform <= 1'b0;
+         end
    	   control_h2c_clr <= control_reg_h2c[0];
 	      start_c2h_d1 <= start_c2h;
          end_c2h_d1 <= end_c2h;
+         c2h_perf_enable_d1 <= c2h_perf_enable;
 	      perf_ctl_stp <=  perf_ctl[1];
 	      perf_ctl_clr <=  perf_ctl[2];
 	      start_imm_d1 <= control_reg_c2h[2] & ~ control_reg_c2h[1];
+         c2h_control <= c2h_control_temp;
       end
    end
-   assign c2h_perform = 1'b0;
-   assign start_c2h = control_reg_c2h[1] | (c2h_perform & c2h_end);
+   // assign c2h_perform = 1'b0;
+   // assign start_c2h = control_reg_c2h[1] | (c2h_perform & c2h_end);
+   assign start_c2h = control_reg_c2h[1];
    assign end_c2h = control_reg_c2h[6];
+   assign c2h_perf_enable = control_reg_c2h[7];
+
    // assign c2h_num_pkt = 16'h400;
    assign start_imm = control_reg_c2h[2] & ~start_imm_d1;
-   assign c2h_control = { 25'h0, end_c2h, control_reg_c2h[5:3],start_imm,start_c2h,control_reg_c2h[0]};
+   logic [31:0] c2h_control_temp;
+   assign c2h_control_temp = { 24'h0, c2h_perf_enable, end_c2h, control_reg_c2h[5:3],start_imm,start_c2h,control_reg_c2h[0]};
 
 //   assign clr_h2c_match = control_reg_h2c[0] & ~control_h2c_clr;
    assign clr_h2c_match = reg_x10_read | (control_reg_h2c[0] & ~control_h2c_clr);
    assign start_c2h_pls = (start_c2h & ~start_c2h_d1) & ~control_reg_c2h[2] & ~control_reg_c2h[5] ;  // for immediate data and Marker no credits will be used 
    assign end_c2h_pls = end_c2h & ~end_c2h_d1;
+   assign c2h_perf_enable_pls = c2h_perf_enable & ~c2h_perf_enable_d1;
    assign perf_stop = perf_ctl[1] & ~perf_ctl_stp;
    assign perf_clear = perf_ctl[2] & ~perf_ctl_clr;
 	 
@@ -582,183 +612,183 @@ module user_control
    // Credit BRAM and 
    // Traffic manger Credit block
 
-   assign tm_dsc_sts_rdy = 1;  // always set to 1.
-   localparam [1:0] 
-     SM_IDLE = 2'b00,
-     SM_TFR  = 2'b01,
-     SM_TEMP = 2'b11,
-     SM_END  = 2'b10;
-   reg [1:0] sm_crdt;
+//    assign tm_dsc_sts_rdy = 1;  // always set to 1.
+//    localparam [1:0] 
+//      SM_IDLE = 2'b00,
+//      SM_TFR  = 2'b01,
+//      SM_TEMP = 2'b11,
+//      SM_END  = 2'b10;
+//    reg [1:0] sm_crdt;
    
-   reg [31:0]  credit_sent;
-   reg start_c2h_pls_d1;
-   reg end_c2h_pls_d1;
-   wire wr_credit_en;
-   reg 	tm_update_d1;
-   wire tm_update;
-   wire [TM_DSC_BITS-1:0] rd_credit_out_bram;
-   wire [TM_DSC_BITS-1:0] wr_credit_in;
-   wire [10:0] 		  wr_credit_qid;
-   wire [10:0] 		  rd_credit_qid;
-   reg 			  tm_dsc_sts_qinv_d1;
-   reg 			  tm_dsc_sts_vld_d1;
-   reg [15:0] 		  tm_dsc_sts_avl_d1;
-   reg [10:0] 		  tm_dsc_sts_qid_d1;
-   wire [TM_DSC_BITS-1:0]  rd_credit_out;
+//    reg [31:0]  credit_sent;
+//    reg start_c2h_pls_d1;
+//    reg end_c2h_pls_d1;
+//    wire wr_credit_en;
+//    reg 	tm_update_d1;
+//    wire tm_update;
+//    wire [TM_DSC_BITS-1:0] wr_credit_in;
+//    wire [10:0] 		  wr_credit_qid;
+//    wire [10:0] 		  rd_credit_qid;
+//    reg 			  tm_dsc_sts_qinv_d1;
+//    reg 			  tm_dsc_sts_vld_d1;
+//    reg [15:0] 		  tm_dsc_sts_avl_d1;
+//    reg [10:0] 		  tm_dsc_sts_qid_d1;
+//    reg [10:0] 		  tm_dsc_sts_qid_d2;
+//    wire [TM_DSC_BITS-1:0]  rd_credit_out;
 
-   always@(posedge axi_aclk) begin
-      tm_dsc_sts_avl_d1 <= tm_dsc_sts_avl;
-      tm_update_d1 <= tm_update;
-      tm_dsc_sts_qinv_d1 <= tm_dsc_sts_qinv;
-      tm_dsc_sts_qid_d1 <= tm_dsc_sts_qid;
-   end
+//    always@(posedge axi_aclk) begin
+//       tm_dsc_sts_avl_d1 <= tm_dsc_sts_avl;
+//       tm_update_d1 <= tm_update;
+//       tm_dsc_sts_qinv_d1 <= tm_dsc_sts_qinv;
+//       tm_dsc_sts_qid_d1 <= tm_dsc_sts_qid;
+//       tm_dsc_sts_qid_d2 <= tm_dsc_sts_qid_d1;
+//    end
 
-   assign rd_credit_out = rd_credit_out_bram;
-//   assign tm_update = tm_dsc_sts_vld & tm_dsc_sts_qen & ~tm_dsc_sts_mm & tm_dsc_sts_dir ;
-     assign tm_update = tm_dsc_sts_vld & (tm_dsc_sts_qen | tm_dsc_sts_qinv ) & ~tm_dsc_sts_mm & tm_dsc_sts_dir ;
+// //   assign tm_update = tm_dsc_sts_vld & tm_dsc_sts_qen & ~tm_dsc_sts_mm & tm_dsc_sts_dir ;
+//      assign tm_update = tm_dsc_sts_vld & (tm_dsc_sts_qen | tm_dsc_sts_qinv ) & ~tm_dsc_sts_mm & tm_dsc_sts_dir ;
 
 
-   assign wr_credit_en = tm_update_d1 | credit_updt;
-   assign wr_credit_in = (tm_update_d1 & tm_dsc_sts_qinv_d1) ? 'h0 : 
-			  credit_updt ? rd_credit_out_bram - credit_out : 
-			  rd_credit_out_bram + tm_dsc_sts_avl_d1;
+//    assign wr_credit_en = tm_update_d1 | credit_updt;
+//    assign wr_credit_in = (tm_update_d1 & tm_dsc_sts_qinv_d1) ? 'h0 : 
+// 			  credit_updt ? rd_credit_out - credit_out : 
+// 			  rd_credit_out + tm_dsc_sts_avl_d1;
 
-   assign wr_credit_qid = credit_updt ? c2h_qid : tm_dsc_sts_qid_d1;
-   assign rd_credit_qid = tm_update ? tm_dsc_sts_qid : c2h_qid;
-   // assign rd_credit_qid = c2h_qid;
+//    assign wr_credit_qid = credit_updt ? c2h_qid : tm_dsc_sts_qid_d1;
+//    assign rd_credit_qid = tm_update ? tm_dsc_sts_qid : tm_update_d2 ? tm_dsc_sts_qid_d2 : c2h_qid;
+//    // assign rd_credit_qid = c2h_qid;
    
-   xpm_memory_sdpram # 
-     (
+//    xpm_memory_sdpram # 
+//      (
         
-      // Common module parameters
-      .MEMORY_SIZE             (TM_DSC_BITS * 11),      //positive integer
-      .MEMORY_PRIMITIVE        ("block"),               //string; "auto", "distributed", "block" or "ultra";
-      .CLOCKING_MODE           ("common_clock"),        //string; "common_clock", "independent_clock" 
-      .MEMORY_INIT_FILE        ("none"),                //string; "none" or "<filename>.mem" 
-      .MEMORY_INIT_PARAM       (""    ),                //string;
-      .USE_MEM_INIT            (1),                     //integer; 0,1
-      .WAKEUP_TIME             ("disable_sleep"),       //string; "disable_sleep" or "use_sleep_pin" 
-      .MESSAGE_CONTROL         (0),                     //integer; 0,1
-      .ECC_MODE                ("no_ecc"),              //string; "no_ecc", "encode_only", "decode_only" or "both_encode_and_decode" 
-      .AUTO_SLEEP_TIME         (0),                     //Do not Change
-      .USE_EMBEDDED_CONSTRAINT (0),                     //integer: 0,1
+//       // Common module parameters
+//       .MEMORY_SIZE             (TM_DSC_BITS * 2048),      //positive integer
+//       .MEMORY_PRIMITIVE        ("block"),               //string; "auto", "distributed", "block" or "ultra";
+//       .CLOCKING_MODE           ("common_clock"),        //string; "common_clock", "independent_clock" 
+//       .MEMORY_INIT_FILE        ("none"),                //string; "none" or "<filename>.mem" 
+//       .MEMORY_INIT_PARAM       (""    ),                //string;
+//       .USE_MEM_INIT            (1),                     //integer; 0,1
+//       .WAKEUP_TIME             ("disable_sleep"),       //string; "disable_sleep" or "use_sleep_pin" 
+//       .MESSAGE_CONTROL         (0),                     //integer; 0,1
+//       .ECC_MODE                ("no_ecc"),              //string; "no_ecc", "encode_only", "decode_only" or "both_encode_and_decode" 
+//       .AUTO_SLEEP_TIME         (0),                     //Do not Change
+//       .USE_EMBEDDED_CONSTRAINT (0),                     //integer: 0,1
       
-      // Port A module parameters
-      .WRITE_DATA_WIDTH_A      (TM_DSC_BITS),           //positive integer
-      .BYTE_WRITE_WIDTH_A      (TM_DSC_BITS),           //integer; 8, 9, or WRITE_DATA_WIDTH_A value
-      .ADDR_WIDTH_A            (11),                    //positive integer
+//       // Port A module parameters
+//       .WRITE_DATA_WIDTH_A      (TM_DSC_BITS),           //positive integer
+//       .BYTE_WRITE_WIDTH_A      (TM_DSC_BITS),           //integer; 8, 9, or WRITE_DATA_WIDTH_A value
+//       .ADDR_WIDTH_A            (11),                    //positive integer
       
-      // Port B module parameters
-      .READ_DATA_WIDTH_B       (TM_DSC_BITS),           //positive integer
-      .ADDR_WIDTH_B            (11),                    //positive integer
-      .READ_RESET_VALUE_B      ("0"),                   //string
-      .READ_LATENCY_B          (1),                     //non-negative integer
-      .WRITE_MODE_B            ("read_first")           //string; "write_first", "read_first", "no_change" 
+//       // Port B module parameters
+//       .READ_DATA_WIDTH_B       (TM_DSC_BITS),           //positive integer
+//       .ADDR_WIDTH_B            (11),                    //positive integer
+//       .READ_RESET_VALUE_B      ("0"),                   //string
+//       .READ_LATENCY_B          (1),                     //non-negative integer
+//       .WRITE_MODE_B            ("read_first")           //string; "write_first", "read_first", "no_change" 
       
-      ) xpm_mem_user_credi_i 
-       (
+//       ) xpm_mem_user_credi_i 
+//        (
 	
-	// Common module ports
-        .sleep          (1'b0),
+// 	// Common module ports
+//         .sleep          (1'b0),
         
-        // Port A module ports
-        .clka           (axi_aclk),
-        .ena            (wr_credit_en),
-        .wea            (wr_credit_en),
-        .addra          (wr_credit_qid),
-        .dina           (wr_credit_in),
-        .injectsbiterra (1'b0),
-        .injectdbiterra (1'b0),
+//         // Port A module ports
+//         .clka           (axi_aclk),
+//         .ena            (wr_credit_en),
+//         .wea            (wr_credit_en),
+//         .addra          (wr_credit_qid),
+//         .dina           (wr_credit_in),
+//         .injectsbiterra (1'b0),
+//         .injectdbiterra (1'b0),
         
-        // Port B module ports
-        .clkb           (axi_aclk),
-        .rstb           (~axi_aresetn),
-        .enb            (1'b1),
-        .regceb         (1'b1),
-        .addrb          (rd_credit_qid),
-        .doutb          (rd_credit_out_bram),
-        .sbiterrb       (),
-        .dbiterrb       ()
-        );
+//         // Port B module ports
+//         .clkb           (axi_aclk),
+//         .rstb           (~axi_aresetn),
+//         .enb            (1'b1),
+//         .regceb         (1'b1),
+//         .addrb          (rd_credit_qid),
+//         .doutb          (rd_credit_out),
+//         .sbiterrb       (),
+//         .dbiterrb       ()
+//         );
 
-   assign buf_count = c2h_st_buffsz/(C_DATA_WIDTH/8);
+//    assign buf_count = c2h_st_buffsz/(C_DATA_WIDTH/8);
    
-   always @(posedge axi_aclk) begin
-      if (!axi_aresetn) begin
-	 tm_vld_out <= 1'b0;
-	 tm_vld_out_d1 <= 1'b0;
-	 tm_vld_out_d2 <= 1'b0;
-	 start_c2h_pls_d1 <=0;
-      end_c2h_pls_d1 <= 0;
-      end
-      else begin
-	 tm_vld_out <= tm_dsc_sts_vld & tm_dsc_sts_qen ;
-	 tm_vld_out_d1 <=tm_vld_out;
-	 tm_vld_out_d2 <=tm_vld_out_d1;
-	 start_c2h_pls_d1 <= start_c2h_pls;
-      end_c2h_pls_d1 <= end_c2h_pls;
-      end
-   end
+//    always @(posedge axi_aclk) begin
+//       if (!axi_aresetn) begin
+//          tm_vld_out <= 1'b0;
+//          tm_vld_out_d1 <= 1'b0;
+//          tm_vld_out_d2 <= 1'b0;
+//          start_c2h_pls_d1 <=0;
+//          end_c2h_pls_d1 <= 0;
+//       end
+//       else begin
+//          tm_vld_out <= tm_dsc_sts_vld & tm_dsc_sts_qen ;
+//          tm_vld_out_d1 <=tm_vld_out;
+//          tm_vld_out_d2 <=tm_vld_out_d1;
+//          start_c2h_pls_d1 <= start_c2h_pls;
+//          end_c2h_pls_d1 <= end_c2h_pls;
+//       end
+//    end
 
-   always @(posedge axi_aclk) begin
-      if (!axi_aresetn) begin
-	 sm_crdt <= SM_IDLE;
-	 credit_updt <= 1'b0;
-	 credit_out <= 0;
-	 credit_sent <= 0;
-      end
-      else
-	case (sm_crdt)
-	  SM_IDLE : begin  // 0
-	      if (start_c2h_pls_d1) begin
-		      if (rd_credit_out >= credit_needed) begin
-		         credit_out <= credit_needed;
-               credit_updt <= 1'b1;
-               credit_sent <= credit_needed;
-		         sm_crdt <= SM_END;
-		      end
-		      else begin
-               credit_updt <= 1'b0;
-               credit_out <= 0;
-               credit_sent <= 0;
-		         sm_crdt <= SM_TFR;
-		      end
-	     end
-	  end
-	  SM_TFR : begin // 1
-	   //   if (tm_vld_out_d2 & (rd_credit_out >= (credit_needed -credit_sent))) begin
-         if (rd_credit_out >= (credit_needed -credit_sent)) begin
-            credit_updt <= 1'b1;
-            credit_out  <= credit_needed - credit_sent;
-            credit_sent <= credit_sent + (credit_needed - credit_sent);
-            sm_crdt <= SM_END;
-	     end
-	   //   else if (tm_vld_out_d2 & (rd_credit_out > 0)) begin
-         else if (rd_credit_out > 0) begin
-            credit_updt <= 1'b1;
-            credit_out  <= rd_credit_out;
-            credit_sent <= credit_sent + rd_credit_out;
-            sm_crdt <= SM_TEMP;
-	     end
-	     else
-		      credit_updt <= 1'b0;
-	  end
-     SM_TEMP : begin //2 cycles for updates to become 0 (rd_credit_out - credit_sent)
-      if (credit_updt == 1'b1) begin
-         credit_updt <= 1'b0;
-         sm_crdt <= SM_TEMP;
-      end else begin 
-         credit_updt <= 1'b0;
-         sm_crdt <= SM_TFR;
-      end
-     end
-	  SM_END : begin // 2
-	     sm_crdt <= SM_IDLE;
-	     credit_updt <= 1'b0;
-	     credit_sent <= 0;
-	  end
-	endcase // case (sm_crdt)
-   end
+//    always @(posedge axi_aclk) begin
+//       if (!axi_aresetn) begin
+//          sm_crdt <= SM_IDLE;
+//          credit_updt <= 1'b0;
+//          credit_out <= 0;
+//          credit_sent <= 0;
+//       end
+//       else
+// 	case (sm_crdt)
+// 	  SM_IDLE : begin  // 0
+// 	      if (start_c2h_pls_d1) begin
+// 		      if (rd_credit_out >= credit_needed) begin
+// 		         credit_out <= credit_needed;
+//                credit_updt <= 1'b1;
+//                credit_sent <= credit_needed;
+// 		         sm_crdt <= SM_END;
+// 		      end
+// 		      else begin
+//                credit_updt <= 1'b0;
+//                credit_out <= 0;
+//                credit_sent <= 0;
+// 		         sm_crdt <= SM_TFR;
+// 		      end
+// 	     end
+// 	  end
+// 	  SM_TFR : begin // 1
+// 	     if (tm_vld_out_d2 & (rd_credit_out >= (credit_needed -credit_sent))) begin
+//          // if (rd_credit_out >= (credit_needed -credit_sent)) begin
+//             credit_updt <= 1'b1;
+//             credit_out  <= credit_needed - credit_sent;
+//             credit_sent <= credit_sent + (credit_needed - credit_sent);
+//             sm_crdt <= SM_END;
+// 	     end
+// 	     else if (tm_vld_out_d2 & (rd_credit_out > 0)) begin
+//          // else if (rd_credit_out > 0) begin
+//             credit_updt <= 1'b1;
+//             credit_out  <= rd_credit_out;
+//             credit_sent <= credit_sent + rd_credit_out;
+//             sm_crdt <= SM_TEMP;
+// 	     end
+// 	     else
+// 		      credit_updt <= 1'b0;
+// 	  end
+//      SM_TEMP : begin //2 cycles for updates to become 0 (rd_credit_out - credit_sent)
+//       if (credit_updt == 1'b1) begin
+//          credit_updt <= 1'b0;
+//          sm_crdt <= SM_TEMP;
+//       end else begin 
+//          credit_updt <= 1'b0;
+//          sm_crdt <= SM_TFR;
+//       end
+//      end
+// 	  SM_END : begin // 2
+// 	     sm_crdt <= SM_IDLE;
+// 	     credit_updt <= 1'b0;
+// 	     credit_sent <= 0;
+// 	  end
+// 	endcase // case (sm_crdt)
+//    end
 
    always @(posedge axi_aclk) begin
       if (!axi_aresetn) begin

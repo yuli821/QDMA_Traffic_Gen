@@ -343,6 +343,10 @@ module qdma_app #(
 
   input          axis_c2h_status_drop,
   input          axis_c2h_status_valid,
+  input          axis_c2h_status_error,
+  input          axis_c2h_status_last,
+  input          axis_c2h_status_cmp,
+  input [10:0]   axis_c2h_status_qid,
 
   input          clk,
   input          rst_n,
@@ -480,6 +484,7 @@ module qdma_app #(
   wire [31:0]   cmpt_size;
   wire [255:0]  wb_dat;
   wire [10:0] c2h_qid;
+  wire [5:0]  hash_val;
 
   wire [TM_DSC_BITS-1:0]   credit_out;
   wire [31:0]   credit_needed;
@@ -495,6 +500,7 @@ module qdma_app #(
 
   wire [31:0] cycles_per_pkt;
   wire [10:0] c2h_num_queue;
+  wire c2h_perform;
 
   // The sys_rst_n input is active low based on the core configuration
   assign sys_resetn = sys_rst_n;
@@ -555,6 +561,9 @@ module qdma_app #(
       )
   user_control_i
     (
+      .c2h_perform(c2h_perform),
+      .c2h_qid(c2h_qid),
+      .hash_val(hash_val),
      .c2h_num_queue(c2h_num_queue),
      .cycles_per_pkt(cycles_per_pkt),
      .axi_aclk (clk),
@@ -629,18 +638,7 @@ module qdma_app #(
      .usr_flr_set (usr_flr_set),
      .usr_flr_clr (usr_flr_clr),
      .usr_flr_done_fnc (usr_flr_done_fnc),
-     .usr_flr_done_vld (usr_flr_done_vld),
-     .tm_dsc_sts_vld    (tm_dsc_sts_vld   ),
-     .tm_dsc_sts_qen    (tm_dsc_sts_qen   ),
-     .tm_dsc_sts_byp    (tm_dsc_sts_byp   ),
-     .tm_dsc_sts_dir    (tm_dsc_sts_dir   ),
-     .tm_dsc_sts_mm     (tm_dsc_sts_mm    ),
-     .tm_dsc_sts_error  (tm_dsc_sts_error ),
-     .tm_dsc_sts_qid    (tm_dsc_sts_qid   ),
-     .tm_dsc_sts_avl    (tm_dsc_sts_avl   ),
-     .tm_dsc_sts_qinv   (tm_dsc_sts_qinv  ),
-     .tm_dsc_sts_irq_arm(tm_dsc_sts_irq_arm),
-     .tm_dsc_sts_rdy    (tm_dsc_sts_rdy)
+     .usr_flr_done_vld (usr_flr_done_vld)
     );
 
   mdma_h2c_axis_tuser_exdes_t   m_axis_h2c_tuser_net;
@@ -775,6 +773,7 @@ module qdma_app #(
     )
   axi_st_module_i
     (
+    .c2h_perform(c2h_perform),
     .c2h_num_queue(c2h_num_queue),
     .cycles_per_pkt(cycles_per_pkt),
     .axi_aresetn (mid_reset_n),
@@ -833,7 +832,20 @@ module qdma_app #(
     .s_axis_c2h_cmpt_ctrl_col_idx        (s_axis_c2h_cmpt_ctrl_col_idx_int),
     .s_axis_c2h_cmpt_ctrl_err_idx        (s_axis_c2h_cmpt_ctrl_err_idx_int),
     .s_axis_c2h_cmpt_tready              (s_axis_c2h_cmpt_tready),
-    .c2h_qid(c2h_qid)
+    .c2h_qid(c2h_qid),
+    .hash_val(hash_val),
+
+    .tm_dsc_sts_vld    (tm_dsc_sts_vld   ),
+     .tm_dsc_sts_qen    (tm_dsc_sts_qen   ),
+     .tm_dsc_sts_byp    (tm_dsc_sts_byp   ),
+     .tm_dsc_sts_dir    (tm_dsc_sts_dir   ),
+     .tm_dsc_sts_mm     (tm_dsc_sts_mm    ),
+     .tm_dsc_sts_error  (tm_dsc_sts_error ),
+     .tm_dsc_sts_qid    (tm_dsc_sts_qid   ),
+     .tm_dsc_sts_avl    (tm_dsc_sts_avl   ),
+     .tm_dsc_sts_qinv   (tm_dsc_sts_qinv  ),
+     .tm_dsc_sts_irq_arm(tm_dsc_sts_irq_arm),
+     .tm_dsc_sts_rdy    (tm_dsc_sts_rdy)
   );
 
   // LEDs for observation

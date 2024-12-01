@@ -1,11 +1,10 @@
-
 #define QDMA_MAX_PORTS	256
 
 #define PORT_0 0
 
 #define NUM_DESC_PER_RING 1024
 
-#define NUM_RX_PKTS (NUM_DESC_PER_RING-2)
+#define NUM_RX_PKTS (NUM_DESC_PER_RING-1)
 //#define NUM_RX_PKTS 32
 #define NUM_TX_PKTS 64
 
@@ -23,15 +22,20 @@
 #define C2H_CONTROL_REG              0x8
 #define ST_LOOPBACK_EN               0x1
 #define ST_C2H_START_VAL             0x2
+#define ST_C2H_END_VAL             0x40
+#define ST_C2H_PERF_ENABLE         0x80
 #define ST_C2H_IMMEDIATE_DATA_EN     0x4
 #define C2H_CONTROL_REG_MASK         0xF
 #define H2C_CONTROL_REG    0xC
 #define H2C_STATUS_REG    0x10
 #define CYCLES_PER_PKT    0x1C
+#define C2H_NUM_QUEUES    0x28
 #define C2H_PACKET_COUNT_REG    0x20
 #define C2H_STATUS_REG                    0x18
 #define C2H_STREAM_MARKER_PKT_GEN_VAL     0x22
 #define MARKER_RESPONSE_COMPLETION_BIT    0x1
+#define RSS_START 		0xA8 //128 entries
+// #define RSS_END 		0x2A4
 
 extern int num_ports;
 
