@@ -21,7 +21,7 @@
 #include "pcierw.h"
 #include "qdma_regs.h"
 
-#define RTE_LIBRTE_QDMA_PMD 1
+// #define RTE_LIBRTE_QDMA_PMD 1
 
 int num_ports;
 struct port_info pinfo[QDMA_MAX_PORTS];
@@ -48,8 +48,8 @@ int port_init(int portid, int num_queues, int st_queues, int nb_descs, int buff_
     printf("Setting up port :%d.\n", portid);
 
     if (rte_pmd_qdma_get_device(portid) == NULL) {
-    printf("Port id %d already removed. Relaunch application to use the port again\n", portid);
-    return -1;
+        printf("Port id %d already removed. Relaunch application to use the port again\n", portid);
+        return -1;
     }
 
     snprintf(pinfo[portid].mem_pool, RTE_MEMPOOL_NAMESIZE, MBUF_POOL_NAME_PORT, portid);
@@ -74,7 +74,7 @@ int port_init(int portid, int num_queues, int st_queues, int nb_descs, int buff_
     mbuf_pool = rte_pktmbuf_pool_create(pinfo[portid].mem_pool, nb_buff, MP_CACHE_SZ, 0, buff_size + RTE_PKTMBUF_HEADROOM, rte_socket_id());
 
     if (mbuf_pool == NULL)
-    rte_exit(EXIT_FAILURE, " Cannot create mbuf pkt-pool\n");
+        rte_exit(EXIT_FAILURE, " Cannot create mbuf pkt-pool\n");
 
     /*
     * Make sure the port is configured. Zero everything and
@@ -86,7 +86,7 @@ int port_init(int portid, int num_queues, int st_queues, int nb_descs, int buff_
     diag = rte_pmd_qdma_get_bar_details(portid, &(pinfo[portid].config_bar_idx), &(pinfo[portid].user_bar_idx), &(pinfo[portid].bypass_bar_idx));
 
     if (diag < 0)
-    rte_exit(EXIT_FAILURE, "rte_pmd_qdma_get_bar_details failed\n");
+        rte_exit(EXIT_FAILURE, "rte_pmd_qdma_get_bar_details failed\n");
 
     printf("QDMA Config bar idx: %d\n", pinfo[portid].config_bar_idx);
     printf("QDMA AXI Master Lite bar idx: %d\n", pinfo[portid].user_bar_idx);
@@ -95,11 +95,12 @@ int port_init(int portid, int num_queues, int st_queues, int nb_descs, int buff_
     /* configure the device to use # queues */
     diag = rte_eth_dev_configure(portid, num_queues, num_queues, &port_conf);
     if (diag < 0)
-    rte_exit(EXIT_FAILURE, "Cannot configure port %d (err=%d)\n", portid, diag);
+        rte_exit(EXIT_FAILURE, "Cannot configure port %d (err=%d)\n", portid, diag);
 
     diag = rte_pmd_qdma_get_queue_base(portid, &queue_base);
     if (diag < 0)
-    rte_exit(EXIT_FAILURE, "rte_pmd_qdma_get_queue_base : Querying of QUEUE_BASE failed\n");
+        rte_exit(EXIT_FAILURE, "rte_pmd_qdma_get_queue_base : Querying of QUEUE_BASE failed\n");
+
     pinfo[portid].queue_base = queue_base;
     pinfo[portid].num_queues = num_queues;
     pinfo[portid].st_queues = st_queues;
@@ -107,33 +108,33 @@ int port_init(int portid, int num_queues, int st_queues, int nb_descs, int buff_
     pinfo[portid].nb_descs = nb_descs;
 
     for (x = 0; x < num_queues; x++) {
-    if (x < st_queues) {
-    diag = rte_pmd_qdma_set_queue_mode(portid, x, RTE_PMD_QDMA_STREAMING_MODE);
-    if (diag < 0)
-    rte_exit(EXIT_FAILURE, "rte_pmd_qdma_set_queue_mode : Passing of QUEUE_MODE failed\n");
-    } else {
-    diag = rte_pmd_qdma_set_queue_mode(portid, x, RTE_PMD_QDMA_MEMORY_MAPPED_MODE);
-    if (diag < 0)
-    rte_exit(EXIT_FAILURE, "rte_pmd_qdma_set_queue_mode : Passing of QUEUE_MODE failed\n");
-    }
+        if (x < st_queues) {
+            diag = rte_pmd_qdma_set_queue_mode(portid, x, RTE_PMD_QDMA_STREAMING_MODE);
+            if (diag < 0)
+                rte_exit(EXIT_FAILURE, "rte_pmd_qdma_set_queue_mode : Passing of QUEUE_MODE failed\n");
+        } else {
+            diag = rte_pmd_qdma_set_queue_mode(portid, x, RTE_PMD_QDMA_MEMORY_MAPPED_MODE);
+            if (diag < 0)
+                rte_exit(EXIT_FAILURE, "rte_pmd_qdma_set_queue_mode : Passing of QUEUE_MODE failed\n");
+        }
 
-    diag = rte_eth_tx_queue_setup(portid, x, nb_descs, 0, &tx_conf);
-    if (diag < 0)
-    rte_exit(EXIT_FAILURE, "Cannot setup port %d TX Queue id:%d (err=%d)\n", portid, x, diag);
-    rx_conf.rx_thresh.wthresh = DEFAULT_RX_WRITEBACK_THRESH;
-    diag = rte_eth_rx_queue_setup(portid, x, nb_descs, 0, &rx_conf, mbuf_pool);
-    if (diag < 0)
-    rte_exit(EXIT_FAILURE, "Cannot setup port %d RX Queue 0 (err=%d)\n", portid, diag);
+        diag = rte_eth_tx_queue_setup(portid, x, nb_descs, 0, &tx_conf);
+        if (diag < 0)
+            rte_exit(EXIT_FAILURE, "Cannot setup port %d TX Queue id:%d (err=%d)\n", portid, x, diag);
+        rx_conf.rx_thresh.wthresh = DEFAULT_RX_WRITEBACK_THRESH;
+        diag = rte_eth_rx_queue_setup(portid, x, nb_descs, 0, &rx_conf, mbuf_pool);
+        if (diag < 0)
+            rte_exit(EXIT_FAILURE, "Cannot setup port %d RX Queue 0 (err=%d)\n", portid, diag);
     }
-    rte_pmd_qdma_set_c2h_descriptor_prefetch(portid, 0, 0);
-    rte_pmd_qdma_set_cmpt_trigger_mode(portid, 0, RTE_PMD_QDMA_TRIG_MODE_EVERY);
+    rte_pmd_qdma_set_c2h_descriptor_prefetch(portid, 0, 1);
+    // rte_pmd_qdma_set_cmpt_trigger_mode(portid, 0, RTE_PMD_QDMA_TRIG_MODE_EVERY);
 
     diag = rte_eth_dev_start(portid);
     if (diag < 0)
-    rte_exit(EXIT_FAILURE, "Cannot start port %d (err=%d)\n", portid, diag);
+        rte_exit(EXIT_FAILURE, "Cannot start port %d (err=%d)\n", portid, diag);
 
     return 0;
-    }
+}
 typedef struct input_arg {
     int** core_to_q;
     int numpkts;
@@ -188,24 +189,34 @@ static int recv_pkt_single_core(input_arg_t* inputs) { // for each lcore
 int main(int argc, char* argv[]) {
     //measure the latency of QDMA read of different loads, start from 2Bytes to 512kB
     //need test data accuracy?
-    if(argc != 10) {
-        printf("./build/test -c 0xf -n 4 portid num_queues buffsize numpkts cycles_per_pkt\n");
-        return 0;
-    }
 
     const struct rte_memzone *mz = 0;
     int ret = 0;
-    int portid = atoi(argv[5]);
-    int num_queues = atoi(argv[6]); //self-defined parameter
-    int stqueues = atoi(argv[7]); //self-defined parameter
     int numdescs = NUM_DESC_PER_RING; //self-defined parameter
-    int buffsize = atoi(argv[7]); //self-defined parameter
-    uint64_t prev_tsc, cur_tsc, temp_tsc, temp_tsc1, diff_tsc; //measure latency
+    uint64_t prev_tsc, cur_tsc, temp_tsc, temp_tsc1, diff_tsc, diff_tsc2, test_tsc; //measure latency
     struct rte_mbuf *mb[NUM_TX_PKTS] = { NULL };
     struct rte_mbuf *pkts[NUM_RX_PKTS] = { NULL };
     struct rte_mempool *mp;
-    int numpkts = atoi(argv[8]);
-    int cycles = atoi(argv[9]);
+    int portid, num_queues, stqueues, buffsize, numpkts, cycles;
+    if (argc == 10) {
+        portid = atoi(argv[5]);
+        num_queues = atoi(argv[6]); //self-defined parameter
+        stqueues = atoi(argv[6]); //self-defined parameter
+        buffsize = atoi(argv[7]); //self-defined parameter
+        numpkts = atoi(argv[8]);
+        cycles = atoi(argv[9]);
+    } else if (argc == 11) {
+        portid = atoi(argv[6]);
+        num_queues = atoi(argv[7]); //self-defined parameter
+        stqueues = atoi(argv[7]); //self-defined parameter
+        buffsize = atoi(argv[8]); //self-defined parameter
+        numpkts = atoi(argv[9]);
+        cycles = atoi(argv[10]);
+    } else {
+        printf("./build/test -c 0xf -n 4 portid num_queues buffsize numpkts cycles_per_pkt\n");
+        printf("./build/test --log-level=pmd:debug -c 0xf -n 4 portid num_queues buffsize numpkts cycles_per_pkt\n");
+        return 0;
+    }
     long int recvpkts = 0;
     int i, j, nb_tx, nb_rx;
     unsigned int q_data_size = 0;
@@ -215,9 +226,8 @@ int main(int argc, char* argv[]) {
     unsigned int max_rx_retry, rcv_count = 0, num_pkts_recv = 0, total_rcv_pkts = 0;
     int user_bar_idx;
     int reg_val, loopback_en;
-    int qbase, queueid, diag;
+    int qbase, diag;
     struct rte_mbuf *nxtmb;
-    queueid = 0;
 
     ret = rte_eal_init(argc, argv);
     if (ret < 0)
@@ -286,10 +296,10 @@ int main(int argc, char* argv[]) {
     // reg_val &= C2H_CONTROL_REG_MASK;
     // loopback_en = reg_val & ST_LOOPBACK_EN;
 
-    int qid = queueid + qbase;
+    int qid = 0;
     for (i = 0 ; i < 128 ; i++) {
-        PciWrite(user_bar_idx, RSS_START + (i*4), qid, portid);
-        qid = (qid + 1) % (qbase+num_queues) + qbase;
+        PciWrite(user_bar_idx, RSS_START + (i*4), qid+qbase, portid);
+        qid = (qid + 1) % num_queues;
     }
 
     // reg_val &= C2H_CONTROL_REG_MASK;
@@ -302,7 +312,7 @@ int main(int argc, char* argv[]) {
     PciWrite(user_bar_idx, C2H_NUM_QUEUES, num_queues, portid);
 
     /* Start the C2H Engine */
-    PciWrite(user_bar_idx, C2H_ST_QID_REG, (queueid + qbase), portid);
+    PciWrite(user_bar_idx, C2H_ST_QID_REG, qbase, portid);
     reg_val = PciRead(user_bar_idx, C2H_CONTROL_REG, portid);
     reg_val |= ST_C2H_START_VAL;
     // reg_val |= ST_C2H_PERF_ENABLE;
@@ -312,9 +322,9 @@ int main(int argc, char* argv[]) {
     // printf("BAR-%d is the QDMA C2H number of packets:0x%x,\n", user_bar_idx, reg_val);
     // reg_val = PciRead(user_bar_idx, CYCLES_PER_PKT, portid);
     // printf("Cycles per packet is : %d\n", reg_val);
-    qid = pinfo[portid].queue_base;
+    qid = 0;
     // clock_t begin,end;
-    double time_elapsed = 0.0;
+    double time_elapsed = 0.0, time_elapsed2 = 0.0;
     double rate = 0.0;
     // bool a = true;
     // begin = clock();
@@ -325,59 +335,55 @@ int main(int argc, char* argv[]) {
     // temp->portid = portid;
     // rte_eal_mp_remote_launch((lcore_function_t*)&recv_pkt_single_core, temp, CALL_MAIN);
     // rte_eal_mp_wait_lcore();
-    temp_tsc = prev_tsc;
-    while(recvpkts < 262144){
+    double arr[10000];
+    int arr_idx = 0, number_pkts = 0;
+    // temp_tsc = prev_tsc;
+    test_tsc = prev_tsc;
+    while(time_elapsed < 1.0){
         // while (recvpkts < 100) {
         // count_pkt = 0;
         // max_rx_retry = RX_TX_MAX_RETRY;
         /* try to receive RX_BURST_SZ packets */
         // rte_pmd_qdma_dbg_qinfo(portid, 0);
         // rte_delay_us(2);
-        nb_rx = rte_eth_rx_burst(portid, qid, pkts, NUM_RX_PKTS);
+        // test_tsc = rte_rdtsc_precise();
+        // printf("First: %ld\n", test_tsc);
+        nb_rx = rte_eth_rx_burst(portid, qid+qbase, pkts, NUM_RX_PKTS);
         // end = clock();
         temp_tsc1 = rte_rdtsc_precise();
-        time_elapsed = (temp_tsc1 - temp_tsc)*1.0 / rte_get_tsc_hz();
-        temp_tsc =  temp_tsc1;
-        rate = nb_rx * pinfo[portid].buff_size * 8 / (time_elapsed * 1000000000); //gbps
-        // if (nb_rx > 0) {
-            
+        diff_tsc = temp_tsc1 - prev_tsc;
+        diff_tsc2 = temp_tsc1 - test_tsc;
+        time_elapsed = diff_tsc*1.0 / rte_get_tsc_hz();
+        time_elapsed2 = diff_tsc2*1.0 / rte_get_tsc_hz();
+        number_pkts += nb_rx;
+        // temp_tsc =  temp_tsc1;
+        // rate = nb_rx * pinfo[portid].buff_size * 8 / (time_elapsed * 1000000000); //gbps
+        if (time_elapsed2 >= 0.0001) {
+            // printf("time_elapsed: %lf, number of packets: %d\n", time_elapsed, number_pkts);
+            test_tsc = temp_tsc1;
+            rate = number_pkts * pinfo[portid].buff_size * 8.0 / (time_elapsed2 * 1000000000.0);
+            arr[arr_idx] = rate;
+            arr_idx++;
+            number_pkts = 0;
             // rte_pmd_qdma_dbg_qinfo(portid, 0);
             // rte_pmd_qdma_dbg_qinfo(portid, 1);
             // rte_pmd_qdma_dbg_qdesc(0, 0, 0, NUM_DESC_PER_RING, RTE_PMD_QDMA_XDEBUG_DESC_C2H);
             // rte_pmd_qdma_dbg_qdesc(0, 1, 0, NUM_DESC_PER_RING, RTE_PMD_QDMA_XDEBUG_DESC_C2H);
-            printf("recv_count: %d, total_recv_pkts: %ld, intend to recv: %d on qid: %d, rate: %lf\n", nb_rx, recvpkts, NUM_RX_PKTS, qid, rate);
+            
             // reg_val = PciRead(user_bar_idx, 0x88, portid);
             // printf("Packet droped : 0x%x\n", reg_val);
             // reg_val = PciRead(user_bar_idx, 0x8C, portid);
             // printf("Packet accepted : 0x%x\n", reg_val);
-        // }
-        // if (recvpkts+nb_rx >= numpkts-1 ) {
-        //     rte_pmd_qdma_dbg_qinfo(portid, 0);
-        //     // break;
-        // }
-        // if (a) {
-            // printf("recv_count: %d, total_recv_pkts: %d, intend to recv: %d on qid: %d, time: %lf\n", nb_rx, recvpkts, NUM_RX_PKTS, qid, time_elapsed);
-            // rte_pmd_qdma_dbg_qinfo(portid, qid);
-        // }
-        // if (nb_rx == 128) {
-        //     a = false;
-        // }
+        }
         for (i = 0; i < nb_rx; i++) {
             // rte_delay_ms(1);
             struct rte_mbuf *mb = pkts[i];
-            // while (mb != NULL) {
-            //     ret += write(fd, rte_pktmbuf_mtod(mb, void*),rte_pktmbuf_data_len(mb));
-            //     printf("Number of bytes send: %d\n", ret);
-            //     nxtmb = mb->next;
-            //     mb = nxtmb;
-            // }
-            // mb = pkts[i];
             rte_pktmbuf_free(mb);
             // count += ret;
             // ret = 0;
         }
         recvpkts += nb_rx;
-        qid = (qid + 1) % (qbase+num_queues) + qbase;
+        qid = (qid + 1) % num_queues;
     }
     cur_tsc = rte_rdtsc_precise();
     /* Stop the C2H Engine */
@@ -388,21 +394,26 @@ int main(int argc, char* argv[]) {
     // printf("%d\n", reg_val);
     PciWrite(user_bar_idx, C2H_CONTROL_REG, reg_val,portid);
 
-
     diff_tsc = cur_tsc - prev_tsc;
     printf("diff_tsc: %ld\n", diff_tsc);
-    tot_time = diff_tsc*1.0 / rte_get_tsc_hz();
-    printf("DMA received number of packets: %ld, on queue-id:%d\n",recvpkts, queueid);
+    // tot_time = diff_tsc*1.0 / rte_get_tsc_hz();
+    printf("DMA received number of packets: %ld\n",recvpkts);
     rte_spinlock_unlock(&pinfo[portid].port_update_lock);
 
-    pkts_per_second = ((double)recvpkts / tot_time);
+    // pkts_per_second = ((double)recvpkts / time_elapsed);
 
     /* Calculate average throughput (Gbps) in bits per second */
-    throughput_gbps = (pinfo[portid].buff_size * 8.0/ (1000000000.0)) * pkts_per_second;
+    throughput_gbps = pinfo[portid].buff_size * 8.0 * recvpkts/ (time_elapsed * 1000000000.0);
 
     printf("Throughput Gbps %lf ", throughput_gbps);
     printf("Number of bytes: %ld ", pinfo[portid].buff_size * recvpkts);
-    printf("total latency: %lf\n", tot_time);
+    printf("total latency: %lf\n", time_elapsed);
+    //print rate 
+    printf("rate arr:\n");
+    for (int r = 0 ; r < arr_idx ; r++) {
+        printf("%lf ", arr[r]);
+    }
+    printf("\n");
     // rte_log_dump(fd);
     // // rte_pmd_qdma_dbg_qinfo(portid, 0);
     // fclose(fd);
