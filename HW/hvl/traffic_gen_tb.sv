@@ -40,7 +40,7 @@ logic [15:0] tm_dsc_sts_avl;
 logic tm_dsc_sts_qinv;
 logic tm_dsc_sts_rdy;
 logic c2h_perform;
-logic [5:0] hash_val;
+logic [31:0] hash_val;
 
 assign tm_dsc_sts_qinv = 1'b0;
 assign tm_dsc_sts_qen = 1'b1;
@@ -50,13 +50,17 @@ assign tm_dsc_sts_byp = 1'b0;
 assign tm_dsc_sts_error = 1'b0;
 assign tm_dsc_sts_irq_arm = 1'b0;
 
-assign rx_qid = 0;
+// assign rx_qid = 0;
 assign txr_size = 256;
 assign cycles = 0;
 assign qid = 0;
-assign num_queue = 11'h2; //2 queues testing
-assign num_pkt = 32'h10000;
+assign num_queue = 11'h4; //2 queues testing
+assign num_pkt = 32'h2000;
 assign cycles_needed  = (txr_size/64 > cycles ? txr_size/64 : cycles) * num_pkt;
+logic [31:0] indir_table [128]; 
+always_comb begin
+    rx_qid = indir_table[hash_val[6:0]];
+end
 
 traffic_gen #(.RX_LEN(len),.MAX_ETH_FRAME(max_frame)) dut(
     .*,
@@ -64,7 +68,7 @@ traffic_gen #(.RX_LEN(len),.MAX_ETH_FRAME(max_frame)) dut(
     .axi_aresetn(resetn),
     .control_reg(ctrlreg),
     .txr_size(txr_size),
-    .num_pkt(num_pkt),
+    // .num_pkt(num_pkt),
     // .credit_in(credit_in),
     // .credit_updt(credit_updt),
     // .credit_perpkt_in(credit_perpkt_in),
@@ -77,32 +81,69 @@ traffic_gen #(.RX_LEN(len),.MAX_ETH_FRAME(max_frame)) dut(
     // .rx_ben(rx_ben),
     .rx_data(rx_data),
     .rx_last(rx_last),
-    .rx_end(rx_end),
     .rx_qid(rx_qid)
 );
 
 task test_generator();
     $display("Start simulation\n");
     // ctrlreg <= 32'h2;
-    c2h_perform <= 1'b1;
-    ##2
-    ctrlreg <= 32'h0;
     rx_ready <= 1'b1;
     tm_dsc_sts_qid <= 0;
-    tm_dsc_sts_avl <= num_pkt >> 1;
+    tm_dsc_sts_avl <= 2048;
     tm_dsc_sts_vld <= 1'b1;
-    ##1;
-    tm_dsc_sts_vld <= 1'b0;
-    ##12;
+    ##3;
     tm_dsc_sts_qid <= 1;
-    tm_dsc_sts_avl <= num_pkt >> 1;
-    tm_dsc_sts_vld <= 1'b1;
-    ##1;
+    ##3;
+    tm_dsc_sts_qid <= 2;
+    ##3;
+    tm_dsc_sts_qid <= 3;
+    ##3;
+    c2h_perform <= 1'b1;
     tm_dsc_sts_vld <= 1'b0;
-    ##11;
-    rx_ready <= 1'b0;
-    ##20;
-    rx_ready <= 1'b1;
+    ##(cycles_needed/4);
+    // rx_ready <= 1'b1;
+    tm_dsc_sts_qid <= 0;
+    tm_dsc_sts_avl <= 2048;
+    tm_dsc_sts_vld <= 1'b1;
+    ##3;
+    tm_dsc_sts_qid <= 1;
+    ##3;
+    tm_dsc_sts_qid <= 2;
+    ##3;
+    tm_dsc_sts_qid <= 3;
+    ##3;
+    tm_dsc_sts_vld <= 1'b0;
+    ##(cycles_needed/4);
+    // rx_ready <= 1'b1;
+    tm_dsc_sts_qid <= 0;
+    tm_dsc_sts_avl <= 2048;
+    tm_dsc_sts_vld <= 1'b1;
+    ##3;
+    tm_dsc_sts_qid <= 1;
+    ##3;
+    tm_dsc_sts_qid <= 2;
+    ##3;
+    tm_dsc_sts_qid <= 3;
+    ##3;
+    tm_dsc_sts_vld <= 1'b0;
+    ##(cycles_needed/4);
+    // rx_ready <= 1'b1;
+    tm_dsc_sts_qid <= 0;
+    tm_dsc_sts_avl <= 2048;
+    tm_dsc_sts_vld <= 1'b1;
+    ##3;
+    tm_dsc_sts_qid <= 1;
+    ##3;
+    tm_dsc_sts_qid <= 2;
+    ##3;
+    tm_dsc_sts_qid <= 3;
+    ##3;
+    tm_dsc_sts_vld <= 1'b0;
+    ##(cycles_needed/4);
+    // ##11;
+    // rx_ready <= 1'b0;
+    // ##20;
+    // rx_ready <= 1'b1;
     // credit_updt <= 1'b0;
     // credit_in <= 1024;
     // credit_updt<= 1'b1;
@@ -112,12 +153,15 @@ task test_generator();
     // $display("One second pass\n");
     // ctrlreg <= 32'h0;
     // rx_ready <= 1'b0;
-    ##cycles_needed
+    // ##cycles_needed
     c2h_perform <= 1'b0;
     $display("Simulation ends");
 endtask
 
 initial begin 
+    for (int i = 0 ; i < 128 ; i++) begin 
+        indir_table[i] = i % 4;
+    end
     resetn <= 1'b0;
     ##5
     resetn <= 1'b1;
