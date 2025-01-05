@@ -23,9 +23,8 @@ module traffic_gen #(
     // output logic [RX_BEN-1:0] rx_ben,
     output logic [RX_LEN-1:0] rx_data, //1 byte
     output logic rx_last,
-    output logic rx_end,
     input logic [10:0] rx_qid,
-    output logic [5:0] hash_val,
+    output logic [31:0] hash_val,
     input logic c2h_perform,
 
     input         tm_dsc_sts_vld,
@@ -42,38 +41,43 @@ module traffic_gen #(
     // output logic c2h_begin
 );
 localparam BYTES_PER_BEAT = RX_LEN/8;
-// localparam DST_MAC = 48'h665544332211;
-localparam TEMP = BYTES_PER_BEAT * 2;
+localparam DST_MAC = 48'h665544332211;
 localparam SRC_MAC = 48'h665544332200;
+localparam TEMP = BYTES_PER_BEAT * 2;
 localparam TCQ = 1;
 
-logic [15:0] frame_size, tot_pkt_size, counter_trans, curr_pkt_size;
+logic [15:0] tot_pkt_size, counter_trans;
 logic [31:0] cycles_pkt;
-logic [47:0] DST_MAC [4];
+// logic [47:0] DST_MAC [4];
 
 logic is_header,updt_crdt,crdt_valid;
 logic [31:0] crc;
-logic [111:0] header_buf;
+logic [111:0] header_eth_buf;  //14 bytes, ethernet layer header
+logic [159:0] header_ip_buf;  //20 bytes, ip layer header
+logic [159:0] header_trans_buf; //20 bytes, transport layer header
+logic [31:0] src_ip_addr, dst_ip_addr;
+logic [15:0] src_port, dst_port;
+logic [7:0] prot;
 logic [RX_LEN-1:0] data_buf;
 logic control_reg_1_d, start_c2h, ready;
-logic [31:0] tcredit_used, credit_in_sync;
 // logic lst_credit_pkt;
-logic [31:0] pkt_count;
+// logic [31:0] pkt_count;
 logic [31:0] cycles_needed;
-int counter_wait, counter_rr, off;
+int counter_wait;
 
 //credit logic and bram
 logic [10:0] rd_credit_qid, rd_credit_qid_d1;
-logic [10:0] wr_credit_qid;
+logic [10:0] wr_credit_qid, wr_credit_qid_d1;
 logic [10:0] rx_qid_d1, rx_qid_d2, rx_qid_d3, rx_qid_d4;
 logic [31:0] wr_credit_in;
 logic signed [31:0] rd_credit_out;
-logic  wr_credit_en, wr_conflict, wr_conflict_d1, wr_conflict_d2;
+logic  wr_credit_en, wr_conflict, wr_conflict_d1;
 enum logic [6:0] {IDLE_CRDT, CRDT_UPDT, CRDT_UPDT_D1, TM_UPDT, TM_UPDT_D1, CRDT_UPDT_D2, CRDT_UPDT_D3} curr_state_crdt, next_state_crdt;
 
 logic [TM_DSC_BITS-1:0] tm_dsc_sts_avl_d1;
 logic [10:0] 		  tm_dsc_sts_qid_d1;
-logic tm_update, tm_dsc_sts_qinv_d1, wr_credit_qid_d1, wr_credit_qid_d2, wr_credit_en_d1, wr_credit_en_d2;
+logic tm_update, tm_dsc_sts_qinv_d1, wr_credit_en_d1;
+
 
 always_ff @(posedge axi_aclk) begin 
     rx_qid_d1 <= rx_qid;
@@ -85,11 +89,9 @@ always_ff @(posedge axi_aclk) begin
     tm_dsc_sts_qid_d1 <= tm_dsc_sts_qid;
     tm_dsc_sts_avl_d1 <= tm_dsc_sts_avl;
     wr_conflict_d1 <= wr_conflict;
-    wr_conflict_d2 <= wr_conflict_d1;
     wr_credit_qid_d1 <= wr_credit_qid;
-    wr_credit_qid_d2 <= wr_credit_qid_d1;
     wr_credit_en_d1 <= wr_credit_en;
-    wr_credit_en_d2 <= wr_credit_en_d1;
+    // wr_credit_en_d2 <= wr_credit_en_d1;
 end
 
 assign tm_dsc_sts_rdy = 1'b1;
@@ -161,7 +163,6 @@ always_comb begin
             else next_state_crdt = IDLE_CRDT;
         end
         TM_UPDT_D1: begin 
-            // if (wr_conflict_d2) next_state = CRDT_UPDT;
             next_state_crdt = TM_UPDT;
         end
         CRDT_UPDT: begin //2 cycles
@@ -242,14 +243,21 @@ xpm_memory_sdpram_inst (
    .wea(wr_credit_en)                       
 );
 
-assign DST_MAC = {48'h000000000001, 48'h000000000002, 48'h000000000003, 48'h000000000004};
-assign header_buf = {DST_MAC[counter_rr], SRC_MAC, 16'h2121}; //omit the length
+// assign DST_MAC = {48'h000000000001, 48'h000000000002, 48'h000000000003, 48'h000000000004};
+xorshift_32bits dst_ip(.seed(32'h01234567), .clk(axi_aclk), .aresetn(axi_aresetn), .update(updt_crdt), .rand_out(dst_ip_addr));
+xorshift_32bits src_ip(.seed(32'h89abcdef), .clk(axi_aclk), .aresetn(axi_aresetn), .update(updt_crdt), .rand_out(src_ip_addr));
+xorshift_16bits src_p(.seed(16'h4e5f), .clk(axi_aclk), .aresetn(axi_aresetn), .update(updt_crdt), .rand_out(src_port));
+assign dst_port = 0;
+assign prot = 8'h6;
+assign header_eth_buf = {DST_MAC, SRC_MAC, 16'h2121}; //omit the length, ethernet layer header
+assign header_ip_buf = {72'b0, prot, 16'b0, src_ip_addr, dst_ip_addr}; //ip/link layer header
+assign header_trans_buf = {src_port, dst_port, 128'b0};//transport layer header
 // assign rx_qid = qid + counter_rr[10:0]%n_queue;
 assign crc = 32'h0a212121;
-assign rx_end = (~rx_valid) & (num_pkt == pkt_count);
 // assign lst_credit_pkt = (credit_perpkt_in - credit_used_perpkt) == 1;
 assign cycles_needed = tot_pkt_size[15:6] +| tot_pkt_size[5:0]; //pkt size must > 64 bytes
-assign hash_val = header_buf[69:64] ^ SRC_MAC[5:0];  //dst xor src mac
+// assign hash_val = header_eth_buf[69:64] ^ SRC_MAC[5:0];  //dst xor src mac
+computeRSShash hash_value(.clk(axi_aclk), .src_ip(src_ip_addr), .dst_ip(dst_ip_addr), .src_port(src_port), .dst_port(dst_port), .protocol(prot), .hash(hash_val));
 
 enum logic [2:0] {IDLE, TRANSFER, WAIT} curr_state, next_state;
 
@@ -268,7 +276,7 @@ always_ff @(posedge axi_aclk) begin
         tot_pkt_size <= txr_size;
         // control_reg_1_d <= control_reg[1];
     end
-    off <= (TEMP - tot_pkt_size + counter_trans)<<3;
+    // off <= (TEMP - tot_pkt_size + counter_trans)<<3;
 end
 
 // always @(posedge axi_aclk)
@@ -284,12 +292,16 @@ always_comb begin
     data_buf = {BYTES_PER_BEAT{8'h41}};
     // off = (TEMP - tot_pkt_size + counter_trans)<<3;
     if (is_header) begin 
-        data_buf[111:0] = header_buf;
+        // data_buf[111:0] = header_eth_buf;
+        data_buf[RX_LEN-1 : RX_LEN-112] = header_eth_buf;
+        data_buf[RX_LEN-113 : RX_LEN-272] = header_ip_buf;
+        data_buf[RX_LEN-273 : RX_LEN-432] = header_trans_buf;
     end
     if (signed'(counter_trans) >= signed'(tot_pkt_size - BYTES_PER_BEAT)) begin 
-        data_buf = data_buf << off;
-        data_buf[RX_LEN-1 : RX_LEN-32] = crc;
-        data_buf = data_buf >> off;
+        // data_buf = data_buf << off;
+        // data_buf[RX_LEN-1 : RX_LEN-32] = crc;
+        // data_buf = data_buf >> off;
+        data_buf[31:0] = crc;
     end 
 end
 assign rx_data = data_buf;
@@ -348,14 +360,13 @@ end
 always_ff @(posedge axi_aclk) begin 
     if (~axi_aresetn) begin 
         curr_state <= IDLE;
-        pkt_count <= 0;
-        tcredit_used <= 0;
+        // pkt_count <= 0;
         counter_wait <= 0;
         counter_trans <= 0;
         is_header <= 1'b1;
         // frame_size <= 0;
         cycles_pkt <= cycles_needed;
-        counter_rr <= 0;
+        // counter_rr <= 0;
         // rx_qid <= qid;
         // updt_crdt <= 1'b0;
     end else begin 
@@ -365,12 +376,11 @@ always_ff @(posedge axi_aclk) begin
                 // updt_crdt <= 1'b0;
                 cycles_pkt <= (cycles_per_pkt > cycles_needed) ? cycles_per_pkt : cycles_needed;
                 // frame_size <= tot_pkt_size;
-                pkt_count <= 0;
-                tcredit_used <= 0;
+                // pkt_count <= 0;
                 counter_wait <= 0;
                 counter_trans <= 0;
                 is_header <= 1'b1;
-                counter_rr <= 0;
+                // counter_rr <= 0;
                 // rx_qid <= qid;
             end
             TRANSFER: begin
@@ -381,10 +391,9 @@ always_ff @(posedge axi_aclk) begin
                     if (counter_trans >= (tot_pkt_size - BYTES_PER_BEAT)) begin
                         // counter_wait = 0;
                         counter_trans <= 0;
-                        tcredit_used <= tcredit_used + 1;
-                        counter_rr <= (counter_rr == 3) ? 0 : counter_rr + 1;
+                        // counter_rr <= (counter_rr == 3) ? 0 : counter_rr + 1;
                         // rx_qid <= (rx_qid == qid + num_queue - 1) ? qid : rx_qid + 1;
-                        pkt_count <= pkt_count + 1;
+                        // pkt_count <= pkt_count + 1;
                         // updt_crdt <= 1'b1;
                     end 
                     else begin 
@@ -412,4 +421,70 @@ always_ff @(posedge axi_aclk) begin
     end
 end
 
+endmodule
+
+module xorshift_32bits(
+    input logic [31:0] seed,
+    input logic clk,
+    input logic aresetn,
+    input logic update,
+    output logic [31:0] rand_out
+);  
+logic [31:0] input_sd, temp, temp2, temp3;
+always_ff @ (posedge clk) begin 
+    if (~aresetn) input_sd <= seed;
+    else if (update) input_sd <= temp3;
+end
+always_comb begin 
+    temp = input_sd ^ (input_sd >> 7);
+    temp2 = temp ^ (temp << 9);
+    temp3 = temp2 ^ (temp2 >> 13);
+    rand_out = temp3;
+end
+endmodule
+
+module xorshift_16bits(
+    input logic [15:0] seed,
+    input logic clk,
+    input logic aresetn,
+    input logic update,
+    output logic [15:0] rand_out
+);
+logic [15:0] input_sd, temp, temp2, temp3;
+always_ff @ (posedge clk) begin 
+    if (~aresetn) input_sd <= seed;
+    else if (update) input_sd <= temp3;
+end
+always_comb begin 
+    temp = input_sd ^ (input_sd >> 7);
+    temp2 = temp ^ (temp << 9);
+    temp3 = temp2 ^ (temp2 >> 8);
+    rand_out = temp3;
+end
+endmodule
+
+module computeRSShash (
+    input logic [31:0] src_ip,
+    input logic [31:0] dst_ip,
+    input logic [15:0] src_port,
+    input logic [15:0] dst_port,
+    input logic [7:0] protocol,
+    input logic clk,
+    output logic [31:0] hash
+);
+localparam [319:0] key = 320'h6d5a56da255b0ec24167253d43a38fb0d0ca2bcbae7b30b477cb2da38030f20c6a42b73bbeac01fa; //40 bytes
+logic [103:0] input_hs;
+logic [31:0] temp;
+always_ff @ (posedge clk) begin 
+    input_hs <= {src_ip, dst_ip, src_port, dst_port, protocol};
+    hash <= temp;
+end
+// assign input_hs = {src_ip, dst_ip, src_port, dst_port, protocol};
+// assign hash = temp;
+always_comb begin
+    temp = 0;
+    for (int i = 0 ; i < 104 ; i = i+1) begin 
+        if (input_hs[i] == 1'b1) temp ^= key[288 - i+:32]; //leftmost 32 bits
+    end
+end
 endmodule

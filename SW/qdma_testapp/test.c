@@ -16,17 +16,20 @@
 #include <getopt.h>
 #include <fcntl.h>
 #include <time.h>
-#include "../../../drivers/net/qdma/rte_pmd_qdma.h"
+#include "/home/yuli9/qdma_ip_driver/QDMA/DPDK/drivers/net/qdma/rte_pmd_qdma.h"
 #include "test.h"
 #include "pcierw.h"
 #include "qdma_regs.h"
 
 // #define RTE_LIBRTE_QDMA_PMD 1
-
-int num_ports;
-struct port_info pinfo[QDMA_MAX_PORTS];
 #define MAX_RX_QUEUE_PER_LCORE 16
 #define MAX_TX_QUEUE_PER_PORT 16
+
+int test_finished = 0;
+int num_ports;
+struct port_info pinfo[QDMA_MAX_PORTS];
+uint64_t packet_recv_per_core[64];
+
 unsigned int num_lcores;
 int* recv_pkts;
 
@@ -35,6 +38,8 @@ struct lcore_queue_conf {
 	unsigned rx_port_list[MAX_RX_QUEUE_PER_LCORE];
 } __rte_cache_aligned;
 struct lcore_queue_conf lcore_queue_conf[RTE_MAX_LCORE];
+
+
 
 int port_init(int portid, int num_queues, int st_queues, int nb_descs, int buff_size)
 {
@@ -144,45 +149,30 @@ typedef struct input_arg {
 static int recv_pkt_single_core(input_arg_t* inputs) { // for each lcore
     int recvpkts = 0;
     int nb_rx, count_pkt;
-    int idx2, idx = rte_lcore_id();
+    int idx2, idx = rte_lcore_id() - 1;
     int** core_to_q = inputs->core_to_q;
     int numpkts = inputs->numpkts;
     int portid = inputs->portid;
     struct rte_mbuf *pkts[NUM_RX_PKTS] = { NULL };
     struct rte_mbuf *mb, *nxtmb;
-    // char * buffer = (char*)malloc(numpkts * pinfo[portid].buff_size);
     uint64_t prev_tsc, cur_tsc;
     double rate = 0.0, elapsed_time = 0.0;
-    // prev_tsc = rte_rdtsc_precise();
-    while(recvpkts < numpkts){
-        count_pkt = 0;
+
+    printf("start test on core %d\n", idx);
+
+    while(!test_finished) {
         idx2 = 0;
         while(core_to_q[idx][idx2] != -1) {
             // rte_delay_us(1);
             nb_rx = rte_eth_rx_burst(portid, core_to_q[idx][idx2], pkts, NUM_RX_PKTS);
-            if (nb_rx > 0) {
-                // cur_tsc = rte_rdtsc_precise();
-                // elapsed_time = (cur_tsc - prev_tsc)*1.0 / rte_get_tsc_hz();
-                // // printf("%ld\n", cur_tsc - prev_tsc);
-                // rate = nb_rx * pinfo[portid].buff_size * 8 / (elapsed_time * 1000000000); //gbps
-                // prev_tsc = cur_tsc;
-                printf("recv_count: %d, total_recv_pkts: %d, queueid: %d, lcoreid: %d, rate: %lf Gbps\n", nb_rx, recvpkts, core_to_q[idx][idx2], idx, rate);
-            }
-            // printf("recv_count: %d, total_recv_pkts: %d, queueid: %d, lcoreid: %d, rate: %lf Gbps\n", nb_rx, recvpkts, core_to_q[idx][idx2], idx, rate);
-            count_pkt += nb_rx;
+            packet_recv_per_core[idx] += nb_rx;
             for (int i = 0; i < nb_rx; i++) {
                 mb = pkts[i];
                 rte_pktmbuf_free(mb);
             }
             idx2++;
         }
-        recv_pkts[idx] += count_pkt;
-        recvpkts = 0;
-        for (int i = 0 ; i < num_lcores; i++) {
-            recvpkts += recv_pkts[i];
-        }
     }
-    // free(buffer);
     return 0;
 }
 
@@ -328,63 +318,48 @@ int main(int argc, char* argv[]) {
     double rate = 0.0;
     // bool a = true;
     // begin = clock();
+
+    input_arg_t* temp = (input_arg_t*)malloc(sizeof(input_arg_t));
+    temp->core_to_q = lcore_q_map;
+    temp->numpkts = numpkts;
+    temp->portid = portid;
+
+    rte_eal_mp_remote_launch((lcore_function_t*)&recv_pkt_single_core, temp, SKIP_MAIN);
+    
+    double arr[10000];
+    uint64_t number_pkts = 0, number_pkts_prev = 0;
+    uint64_t hz = rte_get_timer_hz();
+    uint64_t interval_cycles = 10 * hz;
+
     prev_tsc = rte_rdtsc_precise();
-    // input_arg_t* temp = (input_arg_t*)malloc(sizeof(input_arg_t));
-    // temp->core_to_q = lcore_q_map;
-    // temp->numpkts = numpkts;
-    // temp->portid = portid;
-    // rte_eal_mp_remote_launch((lcore_function_t*)&recv_pkt_single_core, temp, CALL_MAIN);
-    // rte_eal_mp_wait_lcore();
-    double arr[500];
-    int arr_idx = 0, number_pkts = 0;
-    // temp_tsc = prev_tsc;
     test_tsc = prev_tsc;
-    while(time_elapsed < 5.0){
-        // while (recvpkts < 100) {
-        // count_pkt = 0;
-        // max_rx_retry = RX_TX_MAX_RETRY;
-        /* try to receive RX_BURST_SZ packets */
-        // rte_pmd_qdma_dbg_qinfo(portid, 0);
-        // rte_delay_us(2);
-        // test_tsc = rte_rdtsc_precise();
-        // printf("First: %ld\n", test_tsc);
-        nb_rx = rte_eth_rx_burst(portid, qid+qbase, pkts, NUM_RX_PKTS);
-        // end = clock();
-        temp_tsc1 = rte_rdtsc_precise();
-        diff_tsc = temp_tsc1 - prev_tsc;
-        diff_tsc2 = temp_tsc1 - test_tsc;
-        time_elapsed = diff_tsc*1.0 / rte_get_tsc_hz();
-        time_elapsed2 = diff_tsc2*1.0 / rte_get_tsc_hz();
-        number_pkts += nb_rx;
-        // temp_tsc =  temp_tsc1;
-        // rate = nb_rx * pinfo[portid].buff_size * 8 / (time_elapsed * 1000000000); //gbps
-        if (time_elapsed2 >= 0.05) {
-            // printf("time_elapsed: %lf, number of packets: %d\n", time_elapsed, number_pkts);
-            test_tsc = temp_tsc1;
-            rate = number_pkts * pinfo[portid].buff_size * 8.0 / (time_elapsed2 * 1000000000.0);
-            arr[arr_idx] = rate;
-            arr_idx++;
+
+    printf("num_lcore is %d, num_queue is %d\n", num_lcores, num_queues);
+
+    // Monitor and print
+    while(1){
+        cur_tsc = rte_rdtsc_precise();
+        diff_tsc = cur_tsc - prev_tsc;
+
+        // print tput every 1s
+        if (diff_tsc > hz) {
             number_pkts = 0;
-            // rte_pmd_qdma_dbg_qinfo(portid, 0);
-            // rte_pmd_qdma_dbg_qinfo(portid, 1);
-            // rte_pmd_qdma_dbg_qdesc(0, 0, 0, NUM_DESC_PER_RING, RTE_PMD_QDMA_XDEBUG_DESC_C2H);
-            // rte_pmd_qdma_dbg_qdesc(0, 1, 0, NUM_DESC_PER_RING, RTE_PMD_QDMA_XDEBUG_DESC_C2H);
-            
-            // reg_val = PciRead(user_bar_idx, 0x88, portid);
-            // printf("Packet droped : 0x%x\n", reg_val);
-            // reg_val = PciRead(user_bar_idx, 0x8C, portid);
-            // printf("Packet accepted : 0x%x\n", reg_val);
+            for (int i = 0; i < num_lcores - 1; i++) {
+                number_pkts += packet_recv_per_core[i];
+                printf("c%d %ld\n", i, packet_recv_per_core[i]);
+            }
+            rate = (double)(number_pkts - number_pkts_prev) * pinfo[portid].buff_size * 8.0 * (double)diff_tsc / (double)hz / 1000000000.0;
+            printf("Throughput is %lf Gbps\n", rate);
+            prev_tsc = cur_tsc;
+            number_pkts_prev = number_pkts;
         }
-        for (i = 0; i < nb_rx; i++) {
-            // rte_delay_ms(1);
-            struct rte_mbuf *mb = pkts[i];
-            rte_pktmbuf_free(mb);
-            // count += ret;
-            // ret = 0;
+
+        if (cur_tsc - test_tsc >= interval_cycles) {
+            test_finished = 1;
+            break;
         }
-        recvpkts += nb_rx;
-        qid = (qid + 1) % num_queues;
     }
+
     cur_tsc = rte_rdtsc_precise();
     /* Stop the C2H Engine */
     reg_val = PciRead(user_bar_idx, C2H_CONTROL_REG, portid); 
@@ -396,11 +371,12 @@ int main(int argc, char* argv[]) {
 
     diff_tsc = cur_tsc - prev_tsc;
     printf("diff_tsc: %ld\n", diff_tsc);
-    // tot_time = diff_tsc*1.0 / rte_get_tsc_hz();
+
+    for (int i = 0; i < num_lcores; i++) {
+        recvpkts += packet_recv_per_core[i];
+    }
     printf("DMA received number of packets: %ld\n",recvpkts);
     rte_spinlock_unlock(&pinfo[portid].port_update_lock);
-
-    // pkts_per_second = ((double)recvpkts / time_elapsed);
 
     /* Calculate average throughput (Gbps) in bits per second */
     throughput_gbps = pinfo[portid].buff_size * 8.0 * recvpkts/ (time_elapsed * 1000000000.0);
@@ -408,15 +384,7 @@ int main(int argc, char* argv[]) {
     printf("Throughput Gbps %lf ", throughput_gbps);
     printf("Number of bytes: %ld ", pinfo[portid].buff_size * recvpkts);
     printf("total latency: %lf\n", time_elapsed);
-    //print rate 
-    printf("rate arr:\n");
-    for (int r = 0 ; r < arr_idx ; r++) {
-        printf("%lf ", arr[r]);
-    }
-    printf("\n");
-    // rte_log_dump(fd);
-    // // rte_pmd_qdma_dbg_qinfo(portid, 0);
-    // fclose(fd);
+
     rte_eth_dev_stop(portid);
 
     rte_pmd_qdma_dev_close(portid);
@@ -430,7 +398,7 @@ int main(int argc, char* argv[]) {
         free(lcore_q_map[idx]);
     }
     free(lcore_q_map);
-    // free(temp);
+    free(temp);
     free(recv_pkts);
 }
 
