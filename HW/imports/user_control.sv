@@ -107,7 +107,6 @@ module user_control
     output reg [10:0] c2h_st_qid,
     output clr_h2c_match,
     output reg [15:0] c2h_st_len,
-    input c2h_end,
     input h2c_match,
     input h2c_crc_match,
     input [10:0] h2c_qid,
@@ -169,7 +168,7 @@ module user_control
     output reg [10:0] c2h_num_queue,
 
     output [10:0] c2h_qid,
-    input [5:0] hash_val,
+    input [31:0] hash_val,
     output reg c2h_perform
     );
 
@@ -220,10 +219,11 @@ module user_control
    reg h2c_zero_byte_reg;
    wire reg_x10_read;
    reg [31:0] pfch_byp_tag_reg;
-   
+   wire [6:0] hash_idx;
+   assign hash_idx = hash_val[6:0];
    // reg [31:0] c2h_num_queue;
    reg [31:0] rss_indir_table [128];
-   assign c2h_qid = rss_indir_table[hash_val];
+   assign c2h_qid = rss_indir_table[hash_idx];
    // Interpreting request on the axilite master interface
    wire [31:0] wr_addr;
    wire [31:0] rd_addr;
@@ -500,7 +500,8 @@ module user_control
    // 2'b10 : C2H simple bypass mode loopback
    // 2'b11 : C2H bypass out to Completion loopback
    assign c2h_dsc_bypass = dsc_bypass[2:1];
-    
+   logic [31:0] c2h_control_temp;
+   assign c2h_control_temp = { 24'h0, c2h_perf_enable, end_c2h, control_reg_c2h[5:3],start_imm,start_c2h,control_reg_c2h[0]};
    always @(posedge axi_aclk) begin
       if (!axi_aresetn) begin
 	      control_h2c_clr <= 0;
@@ -538,8 +539,6 @@ module user_control
 
    // assign c2h_num_pkt = 16'h400;
    assign start_imm = control_reg_c2h[2] & ~start_imm_d1;
-   logic [31:0] c2h_control_temp;
-   assign c2h_control_temp = { 24'h0, c2h_perf_enable, end_c2h, control_reg_c2h[5:3],start_imm,start_c2h,control_reg_c2h[0]};
 
 //   assign clr_h2c_match = control_reg_h2c[0] & ~control_h2c_clr;
    assign clr_h2c_match = reg_x10_read | (control_reg_h2c[0] & ~control_h2c_clr);

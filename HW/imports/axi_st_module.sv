@@ -153,10 +153,9 @@ module axi_st_module
     output [31:0]                  h2c_count,
     output                         h2c_match,
     output logic                   h2c_crc_match,
-    output                         c2h_end,
     output reg [10:0]              h2c_qid,
     input [10:0] c2h_qid,
-    output [5:0] hash_val,
+    output [31:0] hash_val,
     input c2h_perform
     );
 
@@ -170,6 +169,7 @@ module axi_st_module
    logic [31:0] 	       cmpt_pkt_cnt;
    logic 		       cmpt_tvalid;
    logic 		       start_cmpt;
+   logic rx_begin;
   //  logic [10:0]   c2h_qid;
 
 //   logic  m_axis_h2c_tready;
@@ -248,6 +248,7 @@ module axi_st_module
 
 traffic_gen #(.RX_LEN(C_DATA_WIDTH), .MAX_ETH_FRAME(MAX_ETH_FRAME), .TM_DSC_BITS(TM_DSC_BITS)) 
 traffic_gen_c2h(
+    .*,
     .axi_aclk(axi_aclk),
     .axi_aresetn(axi_aresetn),
     .control_reg(c2h_control),
@@ -265,7 +266,6 @@ traffic_gen_c2h(
     // .rx_ben(s_axis_c2h_dpar),
     .rx_data(s_axis_c2h_tdata),
     .rx_last(s_axis_c2h_tlast),
-    .rx_end(c2h_end),
     .hash_val(hash_val),
     .rx_qid(c2h_qid),
     .c2h_perform(c2h_perform),
@@ -376,45 +376,37 @@ end
 //   end
 // end
 
-always @(posedge axi_aclk ) begin
-  if (~axi_aresetn) begin
-    // cmpt_count <= 32'b0;
-    start_cmpt <= 0;
-    wb_sm <= SM_IDL;
-    cmpt_tvalid <= 0;
-  end
-  else 
-	  case (wb_sm)
-	    SM_IDL : begin
-        // cmpt_tvalid <= 0;
-        if ((start_c2h  | start_cmpt) ) begin
-          wb_sm <= SM_S1;
-          start_cmpt <= 1;
-          cmpt_tvalid <= 1;
-        end
-//	     cmpt_tvalid <= 0;
-	     
-	    end
-	    SM_S1 : 
-        // if (start_cmpt & s_axis_c2h_cmpt_tready & (cmpt_count < c2h_num_pkt)) begin
-        if (start_cmpt & s_axis_c2h_cmpt_tready) begin
-          cmpt_tvalid <= 0;
-          // cmpt_count <= (cmpt_count == (c2h_num_pkt-1)) ? 16'b0 : cmpt_count + 16'b1;
-          // start_cmpt <= (cmpt_count == (c2h_num_pkt-1)) ? 0 : 1;
-          // cmpt_count <= (c2h_perform) ? cmpt_count + 32'b1 : 32'h0;
-          start_cmpt <= (c2h_perform) ? 1 : 0;
-          wb_sm <= SM_IDL;
-        end
-        // if (start_cmpt & s_axis_c2h_cmpt_tready) begin
-	      //   cmpt_tvalid <= 0;
-	      //   cmpt_count <= cmpt_count + 1;
-	      //   start_cmpt <= 1;
-	      //   wb_sm <= SM_IDL;
-	      // end
-	    default : 
-	      wb_sm <= SM_IDL;
-	  endcase // case (wb_sm)
-end
+
+  wire fifo_full, empty;
+  logic rd_en, wr_en;
+  wire [10:0] rd_out_qid;
+  assign cmpt_tvalid = ~empty;
+
+// always @(posedge axi_aclk ) begin
+//   if (~axi_aresetn) begin
+//     // cmpt_count <= 32'b0;
+//     // start_cmpt <= 0;
+//     wb_sm <= SM_IDL;
+//     cmpt_tvalid <= 0;
+//   end
+//   else 
+// 	  case (wb_sm)
+// 	    SM_IDL : begin
+//         if (c2h_perform & ~empty) begin
+//           wb_sm <= SM_S1;
+//           cmpt_tvalid <= 1;
+//         end
+// 	    end
+// 	    SM_S1 : 
+//         // if (start_cmpt & s_axis_c2h_cmpt_tready & (cmpt_count < c2h_num_pkt)) begin
+//         if (empty) begin
+//           cmpt_tvalid <= 0;
+//           wb_sm <= SM_IDL;
+//         end
+// 	    default : 
+// 	      wb_sm <= SM_IDL;
+// 	  endcase // case (wb_sm)
+// end
 
    logic [15 : 0] cmp_par_val;  // fixed 512/32
    // Completione size information
@@ -433,20 +425,9 @@ end
    wire cmpt_user_fmt;
    assign cmpt_user_fmt = cmpt_size[2];  
 
-  wire fifo_full;
-  logic rd_en, rd_en_d1;
-  wire [10:0] rd_out_qid;
   assign rd_en = cmpt_tvalid & s_axis_c2h_cmpt_tready;
-  assign wr_en = s_axis_c2h_tlast;
+  assign wr_en = rx_begin;
   // assign rd_en = cmpt_and & (!cmpt_and_d1);
-  always_ff @(axi_aclk) begin 
-    if (!axi_aresetn) begin 
-      rd_en_d1 <= 1'b0;
-    end
-    else begin 
-      rd_en_d1 <= rd_en;
-    end
-  end
 
    xpm_fifo_sync # 
     (
@@ -477,7 +458,7 @@ end
 	.wr_rst_busy     (),
 	.rd_en           (rd_en),
 	.dout            (rd_out_qid),
-	.empty           (),
+	.empty           (empty),
 	.prog_empty      (),
 	.rd_data_count   (),
 	.underflow       (),

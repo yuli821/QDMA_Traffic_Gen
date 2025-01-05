@@ -27,17 +27,19 @@ module traffic_gen #(
     output logic [31:0] hash_val,
     input logic c2h_perform,
 
-    input         tm_dsc_sts_vld,
-    input         tm_dsc_sts_byp,
-    input         tm_dsc_sts_qen,
-    input         tm_dsc_sts_dir,
-    input         tm_dsc_sts_mm,
-    input         tm_dsc_sts_error,
-    input [10:0]  tm_dsc_sts_qid,
-    input [15:0]  tm_dsc_sts_avl,
-    input         tm_dsc_sts_qinv,
-    input 	  tm_dsc_sts_irq_arm,
-    output        tm_dsc_sts_rdy
+    output logic rx_begin,
+
+    input logic   tm_dsc_sts_vld,
+    input logic   tm_dsc_sts_byp,
+    input logic   tm_dsc_sts_qen,
+    input logic   tm_dsc_sts_dir,
+    input logic   tm_dsc_sts_mm,
+    input logic   tm_dsc_sts_error,
+    input logic [10:0]  tm_dsc_sts_qid,
+    input logic [15:0]  tm_dsc_sts_avl,
+    input logic   tm_dsc_sts_qinv,
+    input logic	  tm_dsc_sts_irq_arm,
+    output logic   tm_dsc_sts_rdy
     // output logic c2h_begin
 );
 localparam BYTES_PER_BEAT = RX_LEN/8;
@@ -50,7 +52,7 @@ logic [15:0] tot_pkt_size, counter_trans;
 logic [31:0] cycles_pkt;
 // logic [47:0] DST_MAC [4];
 
-logic is_header,updt_crdt,crdt_valid;
+logic is_header,updt_crdt,crdt_valid, rx_valid_d1;
 logic [31:0] crc;
 logic [111:0] header_eth_buf;  //14 bytes, ethernet layer header
 logic [159:0] header_ip_buf;  //20 bytes, ip layer header
@@ -72,11 +74,13 @@ logic [10:0] rx_qid_d1, rx_qid_d2, rx_qid_d3, rx_qid_d4;
 logic [31:0] wr_credit_in;
 logic signed [31:0] rd_credit_out;
 logic  wr_credit_en, wr_conflict, wr_conflict_d1;
-enum logic [6:0] {IDLE_CRDT, CRDT_UPDT, CRDT_UPDT_D1, TM_UPDT, TM_UPDT_D1, CRDT_UPDT_D2, CRDT_UPDT_D3} curr_state_crdt, next_state_crdt;
+// enum logic [6:0] {IDLE_CRDT, CRDT_UPDT, CRDT_UPDT_D1, TM_UPDT, TM_UPDT_D1, CRDT_UPDT_D2, CRDT_UPDT_D3} curr_state_crdt, next_state_crdt;
+enum logic [4:0] {IDLE_CRDT, CRDT_UPDT, TM_UPDT, UPDT_CONFLICT, UPDT_CONFLICT_D1} curr_state_crdt, next_state_crdt;
+
 
 logic [TM_DSC_BITS-1:0] tm_dsc_sts_avl_d1;
 logic [10:0] 		  tm_dsc_sts_qid_d1;
-logic tm_update, tm_dsc_sts_qinv_d1, wr_credit_en_d1;
+logic tm_update, tm_dsc_sts_qinv_d1, wr_credit_en_d1, tm_ready;
 
 
 always_ff @(posedge axi_aclk) begin 
@@ -91,12 +95,15 @@ always_ff @(posedge axi_aclk) begin
     wr_conflict_d1 <= wr_conflict;
     wr_credit_qid_d1 <= wr_credit_qid;
     wr_credit_en_d1 <= wr_credit_en;
+    rx_valid_d1 <= rx_valid;
+    // tm_update <= tm_dsc_sts_vld & tm_dsc_sts_rdy & (tm_dsc_sts_qen | tm_dsc_sts_qinv ) & ~tm_dsc_sts_mm & tm_dsc_sts_dir;
     // wr_credit_en_d2 <= wr_credit_en_d1;
 end
 
-assign tm_dsc_sts_rdy = 1'b1;
-assign tm_update = tm_dsc_sts_vld & (tm_dsc_sts_qen | tm_dsc_sts_qinv ) & ~tm_dsc_sts_mm & tm_dsc_sts_dir;
+assign tm_dsc_sts_rdy = tm_ready;
+assign tm_update = tm_dsc_sts_vld & tm_ready & (tm_dsc_sts_qen | tm_dsc_sts_qinv ) & ~tm_dsc_sts_mm & tm_dsc_sts_dir;
 assign wr_conflict = tm_update & updt_crdt;
+assign rx_begin = rx_valid & ~rx_valid_d1;
 
 //credit fsm
 //state logic
@@ -105,45 +112,69 @@ always_comb begin
     wr_credit_qid = 0;
     wr_credit_en = 0;
     wr_credit_in = 0;
+    tm_ready = 1'b0;
     case(curr_state_crdt)
         IDLE_CRDT: begin 
+            tm_ready = 1'b1;
             if (tm_update) begin 
                 rd_credit_qid = tm_dsc_sts_qid;
             end else if (updt_crdt) begin 
                 rd_credit_qid = rx_qid_d1;
-            end
+            end else if (wr_conflict) begin //handle tm update first
+                rd_credit_qid = tm_dsc_sts_qid;
+            end 
+            // else tm_ready = 1'b1;
         end
         TM_UPDT: begin 
             wr_credit_en = 1'b1;
             wr_credit_qid = tm_dsc_sts_qid_d1;
             wr_credit_in = tm_dsc_sts_qinv_d1 ? 'h0 : rd_credit_out + tm_dsc_sts_avl_d1;
-            if (updt_crdt) rd_credit_qid = rx_qid_d1;
-            else if (wr_conflict_d1) rd_credit_qid = rx_qid_d2;
-            else if (tm_update) rd_credit_qid = tm_dsc_sts_qid;
+            rd_credit_qid = rx_qid_d2;
+            if (updt_crdt) begin 
+                // rd_credit_qid = rx_qid_d1;
+                if (tm_dsc_sts_qid_d1 == rx_qid_d1) wr_credit_in = tm_dsc_sts_qinv_d1 ? 'h0 : rd_credit_out + tm_dsc_sts_avl_d1 - 1;
+            end
+            // else if (wr_conflict_d1) rd_credit_qid = rx_qid_d2;
+            // else if (tm_update) rd_credit_qid = tm_dsc_sts_qid;
         end
-        TM_UPDT_D1: begin 
-            rd_credit_qid = tm_dsc_sts_qid_d1;
-        end
+        // TM_UPDT_D1: begin 
+        //     rd_credit_qid = tm_dsc_sts_qid_d1;
+        // end
         CRDT_UPDT: begin 
             wr_credit_en = 1'b1;
             wr_credit_qid = rx_qid_d3;
             wr_credit_in = rd_credit_out - 1;
-            if (tm_update) rd_credit_qid = tm_dsc_sts_qid;
-            else if (updt_crdt) rd_credit_qid = rx_qid_d1;
+            // if (tm_update) rd_credit_qid = tm_dsc_sts_qid;
+            // else if (updt_crdt) rd_credit_qid = rx_qid_d1;
         end
-        CRDT_UPDT_D1: begin 
-            rd_credit_qid = rx_qid_d2;
-        end
-        CRDT_UPDT_D2: begin 
-            rd_credit_qid = rx_qid_d3;
-        end
-        CRDT_UPDT_D3: begin 
+        UPDT_CONFLICT: begin 
             wr_credit_en = 1'b1;
-            wr_credit_qid = rx_qid_d4;
-            wr_credit_in = rd_credit_out - 1;
-            if (tm_update) rd_credit_qid = tm_dsc_sts_qid;
-            else if (updt_crdt) rd_credit_qid = rx_qid_d1;
+            wr_credit_qid = tm_dsc_sts_qid_d1;
+            rd_credit_qid = rx_qid_d2;
+            if (tm_dsc_sts_qid_d1 == rx_qid_d2) begin 
+                wr_credit_in = tm_dsc_sts_qinv_d1 ? 'h0 : rd_credit_out + tm_dsc_sts_avl_d1 - 1;
+            end else begin 
+                wr_credit_in = tm_dsc_sts_qinv_d1 ? 'h0 : rd_credit_out + tm_dsc_sts_avl_d1;
+            end
         end
+        UPDT_CONFLICT_D1: begin 
+            wr_credit_en = 1'b1;
+            wr_credit_qid = rx_qid_d3;
+            wr_credit_in = rd_credit_out - 1;
+        end
+        // CRDT_UPDT_D1: begin 
+        //     rd_credit_qid = rx_qid_d2;
+        // end
+        // CRDT_UPDT_D2: begin 
+        //     rd_credit_qid = rx_qid_d3;
+        // end
+        // CRDT_UPDT_D3: begin 
+        //     wr_credit_en = 1'b1;
+        //     wr_credit_qid = rx_qid_d4;
+        //     wr_credit_in = rd_credit_out - 1;
+        //     if (tm_update) rd_credit_qid = tm_dsc_sts_qid;
+        //     // else if (updt_crdt) rd_credit_qid = rx_qid_d1;
+        // end
     endcase
 end
 //next_state logic
@@ -151,39 +182,49 @@ always_comb begin
     next_state_crdt = IDLE_CRDT;
     case(curr_state_crdt)
         IDLE_CRDT: begin 
-            if(tm_update) next_state_crdt = TM_UPDT;
+            if (wr_conflict) next_state_crdt = UPDT_CONFLICT;
+            else if(tm_update) next_state_crdt = TM_UPDT;
             else if (updt_crdt) next_state_crdt = CRDT_UPDT;
             else next_state_crdt = IDLE_CRDT;
         end
         TM_UPDT: begin //2 cycles
             // next_state = TM_UPDT_D1;
-            if (updt_crdt) next_state_crdt = CRDT_UPDT_D1;
-            else if (wr_conflict_d1) next_state_crdt = CRDT_UPDT_D2 ;
-            else if (tm_update) next_state_crdt = TM_UPDT_D1;
+            if (updt_crdt) begin 
+                if (tm_dsc_sts_qid_d1 == rx_qid_d1) next_state_crdt = IDLE_CRDT;
+                else next_state_crdt = CRDT_UPDT;
+            end
+            // else if (wr_conflict_d1) next_state_crdt = CRDT_UPDT_D2 ;
+            // else if (tm_update) next_state_crdt = TM_UPDT_D1;
             else next_state_crdt = IDLE_CRDT;
         end
-        TM_UPDT_D1: begin 
-            next_state_crdt = TM_UPDT;
-        end
+        // TM_UPDT_D1: begin 
+        //     next_state_crdt = TM_UPDT;
+        // end
         CRDT_UPDT: begin //2 cycles
             // next_state = CRDT_UPDT_D1;
-            if (tm_update) next_state_crdt = TM_UPDT_D1;
-            else if (updt_crdt) next_state_crdt = CRDT_UPDT_D1;
-            else next_state_crdt = IDLE_CRDT;
+            // if (tm_update) next_state_crdt = TM_UPDT_D1;
+            // else if (updt_crdt) next_state_crdt = CRDT_UPDT_D1;
+            // else next_state_crdt = IDLE_CRDT;
+            next_state_crdt = IDLE_CRDT;
         end
-        CRDT_UPDT_D1: begin 
-            // if (tm_update) next_state_crdt = TM_UPDT;
-            // else if (updt_crdt) next_state_crdt = CRDT_UPDT;
-            next_state_crdt = CRDT_UPDT;
+        UPDT_CONFLICT: begin 
+            if (tm_dsc_sts_qid_d1 == rx_qid_d2)  next_state_crdt = IDLE_CRDT;
+            else next_state_crdt = UPDT_CONFLICT_D1;
         end
-        CRDT_UPDT_D2: begin 
-            next_state_crdt = CRDT_UPDT_D3;
+        UPDT_CONFLICT_D1: begin 
+            next_state_crdt = IDLE_CRDT;
         end
-        CRDT_UPDT_D3: begin 
-            if (tm_update) next_state_crdt = TM_UPDT_D1;
-            else if (updt_crdt) next_state_crdt = CRDT_UPDT_D1;
-            else next_state_crdt = IDLE_CRDT;
-        end
+        // CRDT_UPDT_D1: begin 
+        //     next_state_crdt = CRDT_UPDT;
+        // end
+        // CRDT_UPDT_D2: begin 
+        //     next_state_crdt = CRDT_UPDT_D3;
+        // end
+        // CRDT_UPDT_D3: begin 
+        //     if (tm_update) next_state_crdt = TM_UPDT_D1;
+        //     // else if (updt_crdt) next_state_crdt = CRDT_UPDT_D1;
+        //     else next_state_crdt = IDLE_CRDT;
+        // end
     endcase
 end
 
@@ -242,7 +283,7 @@ xpm_memory_sdpram_inst (
    .sleep(1'b0),                  
    .wea(wr_credit_en)                       
 );
-
+// logic updt_random;
 // assign DST_MAC = {48'h000000000001, 48'h000000000002, 48'h000000000003, 48'h000000000004};
 xorshift_32bits dst_ip(.seed(32'h01234567), .clk(axi_aclk), .aresetn(axi_aresetn), .update(updt_crdt), .rand_out(dst_ip_addr));
 xorshift_32bits src_ip(.seed(32'h89abcdef), .clk(axi_aclk), .aresetn(axi_aresetn), .update(updt_crdt), .rand_out(src_ip_addr));
@@ -314,6 +355,7 @@ always_comb begin
     rx_valid = 1'b0;
     rx_last = 1'b0;
     updt_crdt = 1'b0;
+    // updt_random = 1'b0;
     case(curr_state) 
         IDLE: begin 
             if (rx_ready & c2h_perform && crdt_valid) begin 
@@ -337,8 +379,12 @@ always_comb begin
         end
         WAIT: begin 
             if (c2h_perform) begin 
-                if (rx_ready & crdt_valid && (counter_wait >= cycles_pkt-1)) begin //check credit
-                    next_state = TRANSFER;
+                if (crdt_valid & rx_ready && (counter_wait >= cycles_pkt-1)) begin //check credit
+                     next_state = TRANSFER;
+                    // else begin 
+                    //     next_state = WAIT;
+                    //     updt_random = 1'b1;
+                    // end
                 end else begin 
                     next_state = WAIT;
                 end
@@ -409,8 +455,9 @@ always_ff @(posedge axi_aclk) begin
                     // if ((pkt_count == num_pkt) && (counter_wait >= cycles_pkt-1) ) begin 
                     //     counter_wait <= 0;
                     // end else 
-                    if (crdt_valid && (counter_wait >= cycles_pkt-1)) begin //check credit
+                    if (crdt_valid & (counter_wait >= cycles_pkt-1)) begin //check credit
                         counter_wait <= 0;
+                        // else counter_wait <= cycles_pkt - 4;
                     end else begin 
                         counter_wait <= counter_wait + 1;
                     end

@@ -478,13 +478,12 @@ module qdma_app #(
   wire          h2c_match;
   wire          h2c_crc_match;
   wire          clr_h2c_match;
-  wire          c2h_end;
   wire [31:0]   c2h_control;
   wire [10:0]   h2c_qid;
   wire [31:0]   cmpt_size;
   wire [255:0]  wb_dat;
   wire [10:0] c2h_qid;
-  wire [5:0]  hash_val;
+  wire [31:0]  hash_val;
 
   wire [TM_DSC_BITS-1:0]   credit_out;
   wire [31:0]   credit_needed;
@@ -596,7 +595,6 @@ module qdma_app #(
      .c2h_num_pkt (c2h_num_pkt),
      .clr_h2c_match (clr_h2c_match),
      .c2h_st_len (c2h_st_len),
-     .c2h_end (c2h_end),
      .h2c_count (h2c_count),
      .h2c_match (h2c_match),
      .h2c_crc_match  ( h2c_crc_match ),
@@ -783,7 +781,6 @@ module qdma_app #(
     .clr_h2c_match (clr_h2c_match),
     .c2h_st_len (c2h_st_len),
     .c2h_num_pkt (c2h_num_pkt),
-    .c2h_end (c2h_end),
     .h2c_count (h2c_count),
     .h2c_match (h2c_match),
     .h2c_crc_match   ( h2c_crc_match ),

@@ -90,8 +90,6 @@ set_property LOC GTY_QUAD_X0Y3 [get_cells [get_cells -hierarchical -filter PRIMI
 
 #########################################################################
 set_property BITSTREAM.GENERAL.COMPRESS true [current_design]
-set_property BITSTREAM.GENERAL.WRITE0FRAMES No [current_design]
-set_property BITSTREAM.GENERAL.PROCESSALLVEAMS true [current_design]
 ########################################################################
 #set_multicycle_path -setup -from [get_pins -hierarchical -filter {NAME =~ *phy_pipeline/pcie_ltssm_state_chain/with_ff_chain.ff_chain_gen[0].sync_rst.ff_chain_reg[1][*]/C}] -to [get_pins -hierarchical -filter {NAME =~ */*gt_quad_*/inst/quad_inst/PCIELTSSM[*]}] 2
 #set_multicycle_path -hold  -from [get_pins -hierarchical -filter {NAME =~ *phy_pipeline/pcie_ltssm_state_chain/with_ff_chain.ff_chain_gen[0].sync_rst.ff_chain_reg[1][*]/C}] -to [get_pins -hierarchical -filter {NAME =~ */*gt_quad_*/inst/quad_inst/PCIELTSSM[*]}] 1
@@ -126,5 +124,23 @@ set_property BITSTREAM.GENERAL.PROCESSALLVEAMS true [current_design]
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+set_property LOC SLICE_X36Y319 [get_cells qdma_ep_i/qdma_2/inst/rtl_wrapper_inst/dma_wrapper/dma_top/MemArray_reg_0_63_0_6_i_12_replica]
+set_property LOC SLICE_X34Y319 [get_cells qdma_ep_i/qdma_2/inst/rtl_wrapper_inst/dma_wrapper/dma_top/MemArray_reg_0_63_0_6_i_411_comp]
 
 
