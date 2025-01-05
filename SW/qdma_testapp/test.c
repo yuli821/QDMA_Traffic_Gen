@@ -348,7 +348,7 @@ int main(int argc, char* argv[]) {
                 number_pkts += packet_recv_per_core[i];
                 printf("c%d %ld\n", i, packet_recv_per_core[i]);
             }
-            rate = (double)(number_pkts - number_pkts_prev) * pinfo[portid].buff_size * 8.0 * (double)diff_tsc / (double)hz / 1000000000.0;
+            rate = (double)(number_pkts - number_pkts_prev) * pinfo[portid].buff_size * 8.0 / (double)diff_tsc * (double)hz / 1000000000.0;
             printf("Throughput is %lf Gbps\n", rate);
             prev_tsc = cur_tsc;
             number_pkts_prev = number_pkts;
@@ -360,7 +360,7 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    cur_tsc = rte_rdtsc_precise();
+    // cur_tsc = rte_rdtsc_precise();
     /* Stop the C2H Engine */
     reg_val = PciRead(user_bar_idx, C2H_CONTROL_REG, portid); 
     // reg_val &= C2H_CONTROL_REG_MASK;
@@ -369,21 +369,21 @@ int main(int argc, char* argv[]) {
     // printf("%d\n", reg_val);
     PciWrite(user_bar_idx, C2H_CONTROL_REG, reg_val,portid);
 
-    diff_tsc = cur_tsc - prev_tsc;
+    diff_tsc = cur_tsc - test_tsc;
     printf("diff_tsc: %ld\n", diff_tsc);
 
-    for (int i = 0; i < num_lcores; i++) {
+    for (int i = 0; i < num_lcores-1; i++) {
         recvpkts += packet_recv_per_core[i];
     }
-    printf("DMA received number of packets: %ld\n",recvpkts);
+    printf("DMA received number of packets: %ld\n",number_pkts_prev);
     rte_spinlock_unlock(&pinfo[portid].port_update_lock);
 
     /* Calculate average throughput (Gbps) in bits per second */
-    throughput_gbps = pinfo[portid].buff_size * 8.0 * recvpkts/ (time_elapsed * 1000000000.0);
+    throughput_gbps = pinfo[portid].buff_size * 8.0 * number_pkts_prev / (double)diff_tsc * (double)hz / 1000000000.0;
 
     printf("Throughput Gbps %lf ", throughput_gbps);
     printf("Number of bytes: %ld ", pinfo[portid].buff_size * recvpkts);
-    printf("total latency: %lf\n", time_elapsed);
+    printf("total latency: %lf\n", (double)diff_tsc/ (double)hz);
 
     rte_eth_dev_stop(portid);
 
