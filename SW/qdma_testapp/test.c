@@ -335,11 +335,11 @@ int main(int argc, char* argv[]) {
     // temp->portid = portid;
     // rte_eal_mp_remote_launch((lcore_function_t*)&recv_pkt_single_core, temp, CALL_MAIN);
     // rte_eal_mp_wait_lcore();
-    double arr[10000];
+    double arr[500];
     int arr_idx = 0, number_pkts = 0;
     // temp_tsc = prev_tsc;
     test_tsc = prev_tsc;
-    while(time_elapsed < 1.0){
+    while(time_elapsed < 5.0){
         // while (recvpkts < 100) {
         // count_pkt = 0;
         // max_rx_retry = RX_TX_MAX_RETRY;
@@ -358,7 +358,7 @@ int main(int argc, char* argv[]) {
         number_pkts += nb_rx;
         // temp_tsc =  temp_tsc1;
         // rate = nb_rx * pinfo[portid].buff_size * 8 / (time_elapsed * 1000000000); //gbps
-        if (time_elapsed2 >= 0.0001) {
+        if (time_elapsed2 >= 0.05) {
             // printf("time_elapsed: %lf, number of packets: %d\n", time_elapsed, number_pkts);
             test_tsc = temp_tsc1;
             rate = number_pkts * pinfo[portid].buff_size * 8.0 / (time_elapsed2 * 1000000000.0);
