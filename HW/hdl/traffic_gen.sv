@@ -457,6 +457,7 @@ always_ff @(posedge axi_aclk) begin
                     // end else 
                     if (crdt_valid & (counter_wait >= cycles_pkt-1)) begin //check credit
                         counter_wait <= 0;
+                        cycles_pkt <= (cycles_per_pkt > cycles_needed) ? cycles_per_pkt : cycles_needed;
                         // else counter_wait <= cycles_pkt - 4;
                     end else begin 
                         counter_wait <= counter_wait + 1;
