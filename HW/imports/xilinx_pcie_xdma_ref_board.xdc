@@ -140,7 +140,6 @@ set_property BITSTREAM.GENERAL.COMPRESS true [current_design]
 
 
 
-set_property LOC SLICE_X36Y319 [get_cells qdma_ep_i/qdma_2/inst/rtl_wrapper_inst/dma_wrapper/dma_top/MemArray_reg_0_63_0_6_i_12_replica]
-set_property LOC SLICE_X34Y319 [get_cells qdma_ep_i/qdma_2/inst/rtl_wrapper_inst/dma_wrapper/dma_top/MemArray_reg_0_63_0_6_i_411_comp]
+
 
 

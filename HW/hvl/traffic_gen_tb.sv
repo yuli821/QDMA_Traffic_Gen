@@ -27,7 +27,6 @@ logic rx_end;
 logic [15:0] txr_size;
 logic [10:0] qid, num_queue, rx_qid;
 logic [31:0] cycles_needed;
-logic c2h_begin;
 logic tm_dsc_sts_vld;
 logic tm_dsc_sts_byp;
 logic tm_dsc_sts_error;
@@ -39,8 +38,21 @@ logic [10:0] tm_dsc_sts_qid;
 logic [15:0] tm_dsc_sts_avl;
 logic tm_dsc_sts_qinv;
 logic tm_dsc_sts_rdy;
-logic c2h_perform, rx_begin;
+logic c2h_perform, c2h_perform_d1, rx_begin;
 logic [31:0] hash_val;
+logic [79:0] timestamp;
+logic perform_begin;
+wire back_pres;
+assign back_pres = 1'b1;
+always_ff @(posedge clk) begin 
+    c2h_perform_d1 <= c2h_perform;
+end
+assign perform_begin = c2h_perform & ~c2h_perform_d1;
+
+always_ff @(posedge clk) begin 
+    if (~resetn || perform_begin) timestamp <= 0;
+    else timestamp += 1;
+end
 
 assign tm_dsc_sts_qinv = 1'b0;
 assign tm_dsc_sts_qen = 1'b1;
@@ -51,10 +63,10 @@ assign tm_dsc_sts_error = 1'b0;
 assign tm_dsc_sts_irq_arm = 1'b0;
 
 // assign rx_qid = 0;
-assign txr_size = 256;
+assign txr_size = 128;
 assign cycles = 0;
 assign qid = 0;
-assign num_queue = 11'h4; //2 queues testing
+assign num_queue = 11'h4; //4 queues testing
 assign num_pkt = 32'h2000;
 assign cycles_needed  = (txr_size/64 > cycles ? txr_size/64 : cycles) * num_pkt;
 logic [31:0] indir_table [128]; 
@@ -62,6 +74,21 @@ always_comb begin
     rx_qid = indir_table[hash_val[6:0]];
 end
 
+reg [15:0] 	       bp_lfsr;
+wire 	       bp_lfsr_net;
+assign bp_lfsr_net = bp_lfsr[0] ^ bp_lfsr[2] ^ bp_lfsr[3] ^ bp_lfsr[5];
+
+// always @(posedge clk) begin
+//     if (~resetn) begin
+//         bp_lfsr <= 16'h0011; // initial seed for back pressure LFSR
+//         rx_ready <= 1'b1;
+//     end
+//     else begin
+//         bp_lfsr <= {bp_lfsr_net,bp_lfsr[15:1]};
+//         rx_ready <= (back_pres && bp_lfsr[0]) ? 1'b0 : 1'b1; // some random back pressure
+//     end
+// end
+assign rx_ready = 1'b1;
 traffic_gen #(.RX_LEN(len),.MAX_ETH_FRAME(max_frame)) dut(
     .*,
     .axi_aclk(clk),
@@ -84,10 +111,35 @@ traffic_gen #(.RX_LEN(len),.MAX_ETH_FRAME(max_frame)) dut(
     .rx_qid(rx_qid)
 );
 
+logic [9:0] target, counter;
+
+always_ff @(posedge clk) begin 
+    if (~resetn) begin 
+        target <= $urandom;
+        if (target==0) target = 1023;
+        counter <= 0;
+        tm_dsc_sts_qid <= 3;
+        tm_dsc_sts_avl <= 0;
+        tm_dsc_sts_vld <= 0;
+    end
+    else if ((counter == target) & tm_dsc_sts_rdy) begin
+        tm_dsc_sts_qid <= (tm_dsc_sts_qid + 1)%4;
+        tm_dsc_sts_avl = $urandom;
+        tm_dsc_sts_avl = tm_dsc_sts_avl>>7;
+        tm_dsc_sts_vld <= 1'b1;
+        counter <= 0;
+        target <= $urandom;
+        if (target==0) target = 1023;
+    end else begin 
+        counter++;
+        tm_dsc_sts_vld <= 0;
+    end
+end
+
 task test_generator();
     $display("Start simulation\n");
     // ctrlreg <= 32'h2;
-    rx_ready <= 1'b1;
+    // rx_ready <= 1'b1;
     @(tb_clk iff(tm_dsc_sts_rdy == 1'b1));
     tm_dsc_sts_qid <= 0;
     tm_dsc_sts_avl <= 1024;
@@ -123,87 +175,87 @@ task test_generator();
     tm_dsc_sts_avl <= 0;
     tm_dsc_sts_qid <= 0;
     // ##1;
-    c2h_perform <= 1'b1;
-    ##(cycles_needed/4 + 1);
-    // rx_ready <= 1'b1;
-    @(posedge tb_clk iff(tm_dsc_sts_rdy == 1'b1));
-    tm_dsc_sts_qid <= 0;
-    tm_dsc_sts_avl <= 1024;
-    tm_dsc_sts_vld <= 1'b1;
-    ##1;
-    tm_dsc_sts_vld <= 1'b0;
+    // c2h_perform <= 1'b1;
+    // ##(cycles_needed/4 + 1);
+    // // rx_ready <= 1'b1;
+    // @(posedge tb_clk iff(tm_dsc_sts_rdy == 1'b1));
+    // tm_dsc_sts_qid <= 0;
+    // tm_dsc_sts_avl <= 1024;
+    // tm_dsc_sts_vld <= 1'b1;
     // ##1;
-    @(posedge tb_clk iff(tm_dsc_sts_rdy == 1'b1));
-    tm_dsc_sts_vld <= 1'b1;
-    tm_dsc_sts_qid <= 1;
-    ##1;
-    tm_dsc_sts_vld <= 1'b0;
+    // tm_dsc_sts_vld <= 1'b0;
+    // // ##1;
+    // @(posedge tb_clk iff(tm_dsc_sts_rdy == 1'b1));
+    // tm_dsc_sts_vld <= 1'b1;
+    // tm_dsc_sts_qid <= 1;
     // ##1;
-    @(posedge tb_clk iff(tm_dsc_sts_rdy == 1'b1));
-    tm_dsc_sts_vld <= 1'b1;
-    tm_dsc_sts_qid <= 2;
-    ##1;
-    tm_dsc_sts_vld <= 1'b0;
+    // tm_dsc_sts_vld <= 1'b0;
+    // // ##1;
+    // @(posedge tb_clk iff(tm_dsc_sts_rdy == 1'b1));
+    // tm_dsc_sts_vld <= 1'b1;
+    // tm_dsc_sts_qid <= 2;
     // ##1;
-    @(posedge tb_clk iff(tm_dsc_sts_rdy == 1'b1));
-    tm_dsc_sts_vld <= 1'b1;
-    tm_dsc_sts_qid <= 3;
-    ##1;
-    tm_dsc_sts_vld <= 1'b0;
-    ##(cycles_needed/4);
-    // rx_ready <= 1'b1;
-    @(posedge tb_clk iff(tm_dsc_sts_rdy == 1'b1));
-    tm_dsc_sts_qid <= 0;
-    tm_dsc_sts_avl <= 1024;
-    tm_dsc_sts_vld <= 1'b1;
-    ##1;
-    tm_dsc_sts_vld <= 1'b0;
+    // tm_dsc_sts_vld <= 1'b0;
+    // // ##1;
+    // @(posedge tb_clk iff(tm_dsc_sts_rdy == 1'b1));
+    // tm_dsc_sts_vld <= 1'b1;
+    // tm_dsc_sts_qid <= 3;
     // ##1;
-    @(posedge tb_clk iff(tm_dsc_sts_rdy == 1'b1));
-    tm_dsc_sts_vld <= 1'b1;
-    tm_dsc_sts_qid <= 1;
-    ##1;
-    tm_dsc_sts_vld <= 1'b0;
+    // tm_dsc_sts_vld <= 1'b0;
+    // ##(cycles_needed/4);
+    // // rx_ready <= 1'b1;
+    // @(posedge tb_clk iff(tm_dsc_sts_rdy == 1'b1));
+    // tm_dsc_sts_qid <= 0;
+    // tm_dsc_sts_avl <= 1024;
+    // tm_dsc_sts_vld <= 1'b1;
     // ##1;
-    @(posedge tb_clk iff(tm_dsc_sts_rdy == 1'b1));
-    tm_dsc_sts_vld <= 1'b1;
-    tm_dsc_sts_qid <= 2;
-    ##1;
-    tm_dsc_sts_vld <= 1'b0;
+    // tm_dsc_sts_vld <= 1'b0;
+    // // ##1;
+    // @(posedge tb_clk iff(tm_dsc_sts_rdy == 1'b1));
+    // tm_dsc_sts_vld <= 1'b1;
+    // tm_dsc_sts_qid <= 1;
     // ##1;
-    @(posedge tb_clk iff(tm_dsc_sts_rdy == 1'b1));
-    tm_dsc_sts_vld <= 1'b1;
-    tm_dsc_sts_qid <= 3;
-    ##1;
-    tm_dsc_sts_vld <= 1'b0;
+    // tm_dsc_sts_vld <= 1'b0;
+    // // ##1;
+    // @(posedge tb_clk iff(tm_dsc_sts_rdy == 1'b1));
+    // tm_dsc_sts_vld <= 1'b1;
+    // tm_dsc_sts_qid <= 2;
     // ##1;
-    ##(cycles_needed/4);
-    // rx_ready <= 1'b1;
-    tm_dsc_sts_qid <= 0;
-    tm_dsc_sts_avl <= 1024;
-    tm_dsc_sts_vld <= 1'b1;
-    ##1;
-    tm_dsc_sts_vld <= 1'b0;
+    // tm_dsc_sts_vld <= 1'b0;
+    // // ##1;
+    // @(posedge tb_clk iff(tm_dsc_sts_rdy == 1'b1));
+    // tm_dsc_sts_vld <= 1'b1;
+    // tm_dsc_sts_qid <= 3;
     // ##1;
-    @(posedge tb_clk iff(tm_dsc_sts_rdy == 1'b1));
-    tm_dsc_sts_vld <= 1'b1;
-    tm_dsc_sts_qid <= 1;
-    ##1;
-    tm_dsc_sts_vld <= 1'b0;
+    // tm_dsc_sts_vld <= 1'b0;
+    // // ##1;
+    // ##(cycles_needed/4);
+    // // rx_ready <= 1'b1;
+    // tm_dsc_sts_qid <= 0;
+    // tm_dsc_sts_avl <= 1024;
+    // tm_dsc_sts_vld <= 1'b1;
     // ##1;
-    @(posedge tb_clk iff(tm_dsc_sts_rdy == 1'b1));
-    tm_dsc_sts_vld <= 1'b1;
-    tm_dsc_sts_qid <= 2;
-    ##1;
-    tm_dsc_sts_vld <= 1'b0;
+    // tm_dsc_sts_vld <= 1'b0;
+    // // ##1;
+    // @(posedge tb_clk iff(tm_dsc_sts_rdy == 1'b1));
+    // tm_dsc_sts_vld <= 1'b1;
+    // tm_dsc_sts_qid <= 1;
     // ##1;
-    @(posedge tb_clk iff(tm_dsc_sts_rdy == 1'b1));
-    tm_dsc_sts_vld <= 1'b1;
-    tm_dsc_sts_qid <= 3;
-    ##1;
-    tm_dsc_sts_vld <= 1'b0;
+    // tm_dsc_sts_vld <= 1'b0;
+    // // ##1;
+    // @(posedge tb_clk iff(tm_dsc_sts_rdy == 1'b1));
+    // tm_dsc_sts_vld <= 1'b1;
+    // tm_dsc_sts_qid <= 2;
     // ##1;
-    ##(cycles_needed/4);
+    // tm_dsc_sts_vld <= 1'b0;
+    // // ##1;
+    // @(posedge tb_clk iff(tm_dsc_sts_rdy == 1'b1));
+    // tm_dsc_sts_vld <= 1'b1;
+    // tm_dsc_sts_qid <= 3;
+    // ##1;
+    // tm_dsc_sts_vld <= 1'b0;
+    // // ##1;
+    // ##(cycles_needed/4);
     // ##11;
     // rx_ready <= 1'b0;
     // ##20;
@@ -218,8 +270,8 @@ task test_generator();
     // ctrlreg <= 32'h0;
     // rx_ready <= 1'b0;
     // ##cycles_needed
-    c2h_perform <= 1'b0;
-    $display("Simulation ends");
+    // c2h_perform <= 1'b0;
+    // $display("Simulation ends");
 endtask
 
 initial begin 
@@ -230,7 +282,11 @@ initial begin
     ##5
     resetn <= 1'b1;
     ##1
-    test_generator();
+    // test_generator();
+    // ##1
+    c2h_perform <= 1'b1;
+    ##250000000
+    c2h_perform <= 1'b0;
 end
 
 endmodule

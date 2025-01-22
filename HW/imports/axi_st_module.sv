@@ -156,7 +156,9 @@ module axi_st_module
     output reg [10:0]              h2c_qid,
     input [10:0] c2h_qid,
     output [31:0] hash_val,
-    input c2h_perform
+    input c2h_perform,
+    input [31:0] read_addr,
+    output [31:0] rd_output
     );
 
    logic [CRC_WIDTH-1 : 0]     gen_h2c_tcrc;
@@ -174,77 +176,89 @@ module axi_st_module
 
 //   logic  m_axis_h2c_tready;
 //   logic [C_DATA_WIDTH-1 :0] s_axis_c2h_tdata;
+
+logic [79:0] timestamp_counter;
+logic perform_begin, perform_d1;
+assign perform_begin = c2h_perform & ~perform_d1;
+
+always_ff @(posedge axi_aclk) begin
+  if (~axi_aresetn || perform_begin) timestamp_counter <= 0;
+  else timestamp_counter += 1;
+end
    
-   always @(posedge axi_aclk) begin
-      if (~axi_aresetn) begin
-	      h2c_qid <= 0;
-      end
-      else begin
-	      h2c_qid <= (m_axis_h2c_tvalid & m_axis_h2c_tlast) ? m_axis_h2c_tuser_qid[10:0] : h2c_qid;
-      end
-   end
+always @(posedge axi_aclk) begin
+  if (~axi_aresetn) begin
+    h2c_qid <= 0;
+    perform_d1 <= 0;
+  end
+  else begin
+    h2c_qid <= (m_axis_h2c_tvalid & m_axis_h2c_tlast) ? m_axis_h2c_tuser_qid[10:0] : h2c_qid;
+    perform_d1 <= c2h_perform;
+  end
+end
 
-   reg [$clog2(C_DATA_WIDTH/8)-1:0]  s_axis_c2h_mty_reg;
-   reg [15:0] s_axis_c2h_ctrl_len_reg;
+reg [$clog2(C_DATA_WIDTH/8)-1:0]  s_axis_c2h_mty_reg;
+reg [15:0] s_axis_c2h_ctrl_len_reg;
 
-   always @(posedge axi_aclk) begin
-      s_axis_c2h_mty_reg <= (start_imm | c2h_control[5]) ? 6'h0 :
-                           (c2h_st_len%(C_DATA_WIDTH/8) > 0) ? C_DATA_WIDTH/8 - (c2h_st_len%(C_DATA_WIDTH/8)) :
-				6'b0;  //calculate empty bytes for c2h Streaming interface.
+always @(posedge axi_aclk) begin
+  s_axis_c2h_mty_reg <= (start_imm | c2h_control[5]) ? 6'h0 :
+                        (c2h_st_len%(C_DATA_WIDTH/8) > 0) ? C_DATA_WIDTH/8 - (c2h_st_len%(C_DATA_WIDTH/8)) :
+    6'b0;  //calculate empty bytes for c2h Streaming interface.
 
-      s_axis_c2h_ctrl_len_reg <= (start_imm | c2h_control[5]) ?  (16'h0 | C_DATA_WIDTH/8) : c2h_st_len; // in case of Immediate data, length = C_DATA_WIDTH/8
-   end
+  s_axis_c2h_ctrl_len_reg <= (start_imm | c2h_control[5]) ?  (16'h0 | C_DATA_WIDTH/8) : c2h_st_len; // in case of Immediate data, length = C_DATA_WIDTH/8
+end
 
-   assign s_axis_c2h_ctrl_marker = c2h_control[5];   // C2H Marker Enabled
+assign s_axis_c2h_ctrl_marker = c2h_control[5];   // C2H Marker Enabled
 
-   assign s_axis_c2h_ctrl_has_cmpt =  ~c2h_control[3];  // Disable completions
-   assign s_axis_c2h_mty = s_axis_c2h_tlast ? s_axis_c2h_mty_reg : 6'h0;
-   assign s_axis_c2h_ctrl_len = s_axis_c2h_ctrl_len_reg;
+assign s_axis_c2h_ctrl_has_cmpt =  ~c2h_control[3];  // Disable completions
+assign s_axis_c2h_mty = s_axis_c2h_tlast ? s_axis_c2h_mty_reg : 6'h0;
+assign s_axis_c2h_ctrl_len = s_axis_c2h_ctrl_len_reg;
 
-   assign s_axis_c2h_ctrl_qid = c2h_dsc_bypass[1:0] == 2'b10 ? pfch_byp_tag_qid : c2h_qid;
-  
- // C2H Stream data CRC Generator
-   crc32_gen #(
-     .MAX_DATA_WIDTH   ( C_DATA_WIDTH      ),
-     .CRC_WIDTH        ( CRC_WIDTH         )
-   ) crc32_gen_c2h_i (
-     // Clock and Resetd
-     .clk              ( axi_aclk          ),
-     .rst_n            ( axi_aresetn       ),
-     .in_par_err       ( 1'b0              ),
-     .in_misc_err      ( 1'b0              ),
-     .in_crc_dis       ( 1'b0              ),
+assign s_axis_c2h_ctrl_qid = c2h_dsc_bypass[1:0] == 2'b10 ? pfch_byp_tag_qid : c2h_qid;
 
-     .in_data          ( s_axis_c2h_tdata  ),
-     .in_vld           ( (s_axis_c2h_tvalid & s_axis_c2h_tready) ),
-     .in_tlast         ( s_axis_c2h_tlast  ),
-     .in_mty           ( s_axis_c2h_mty_reg    ),
-     .out_crc          ( s_axis_c2h_tcrc   )
-   );
+// C2H Stream data CRC Generator
+crc32_gen #(
+  .MAX_DATA_WIDTH   ( C_DATA_WIDTH      ),
+  .CRC_WIDTH        ( CRC_WIDTH         )
+) crc32_gen_c2h_i (
+  // Clock and Resetd
+  .clk              ( axi_aclk          ),
+  .rst_n            ( axi_aresetn       ),
+  .in_par_err       ( 1'b0              ),
+  .in_misc_err      ( 1'b0              ),
+  .in_crc_dis       ( 1'b0              ),
 
-  //    ST_c2h #(
-  //    .BIT_WIDTH   ( C_DATA_WIDTH ),
-  //    .TM_DSC_BITS ( TM_DSC_BITS )
-  //     )
-  //    ST_c2h_0 
-  //      (
-	// .axi_aclk    (axi_aclk),
-	// .axi_aresetn (axi_aresetn),
-	// .control_reg (c2h_control),
-	// .txr_size    (s_axis_c2h_ctrl_len),
-	// .num_pkt     (c2h_num_pkt),
-	// .credit_in   (credit_in),
-	// .credit_perpkt_in (credit_perpkt_in),
-	// .credit_needed   (credit_needed),
-	// .credit_updt (credit_updt),
-	// .buf_count   (buf_count),
-	// .c2h_tdata   (s_axis_c2h_tdata),
-	// .c2h_dpar    (s_axis_c2h_dpar),
-	// .c2h_tvalid  (s_axis_c2h_tvalid),
-	// .c2h_tlast   (s_axis_c2h_tlast),
-	// .c2h_end     (c2h_end),
-	// .c2h_tready  (s_axis_c2h_tready)
-  // );
+  .in_data          ( s_axis_c2h_tdata  ),
+  .in_vld           ( (s_axis_c2h_tvalid & s_axis_c2h_tready) ),
+  .in_tlast         ( s_axis_c2h_tlast  ),
+  .in_mty           ( s_axis_c2h_mty_reg    ),
+  .out_crc          ( s_axis_c2h_tcrc   )
+);
+
+//    ST_c2h #(
+//    .BIT_WIDTH   ( C_DATA_WIDTH ),
+//    .TM_DSC_BITS ( TM_DSC_BITS )
+//     )
+//    ST_c2h_0 
+//      (
+// .axi_aclk    (axi_aclk),
+// .axi_aresetn (axi_aresetn),
+// .control_reg (c2h_control),
+// .txr_size    (s_axis_c2h_ctrl_len),
+// .num_pkt     (c2h_num_pkt),
+// .credit_in   (credit_in),
+// .credit_perpkt_in (credit_perpkt_in),
+// .credit_needed   (credit_needed),
+// .credit_updt (credit_updt),
+// .buf_count   (buf_count),
+// .c2h_tdata   (s_axis_c2h_tdata),
+// .c2h_dpar    (s_axis_c2h_dpar),
+// .c2h_tvalid  (s_axis_c2h_tvalid),
+// .c2h_tlast   (s_axis_c2h_tlast),
+// .c2h_end     (c2h_end),
+// .c2h_tready  (s_axis_c2h_tready)
+// );
+
 
 traffic_gen #(.RX_LEN(C_DATA_WIDTH), .MAX_ETH_FRAME(MAX_ETH_FRAME), .TM_DSC_BITS(TM_DSC_BITS)) 
 traffic_gen_c2h(
@@ -254,6 +268,7 @@ traffic_gen_c2h(
     .control_reg(c2h_control),
     .txr_size(s_axis_c2h_ctrl_len),
     .num_pkt(c2h_num_pkt),
+    .timestamp(timestamp_counter),
     // .credit_in(credit_in),
     // .credit_updt(credit_updt),
     // .credit_perpkt_in(credit_perpkt_in),
@@ -284,28 +299,32 @@ traffic_gen_c2h(
 );
 
   ST_h2c #(
-     .BIT_WIDTH         ( C_DATA_WIDTH ),
-     .C_H2C_TUSER_WIDTH ( C_H2C_TUSER_WIDTH )
-     )
-     ST_h2c_0 (
-     .axi_aclk    (axi_aclk),
-     .axi_aresetn (axi_aresetn),
-     .control_reg (32'h0),
-     .control_run (1'b0),
-     .h2c_txr_size(32'h0),
-     .h2c_tdata   (m_axis_h2c_tdata),
-     .h2c_tvalid  (m_axis_h2c_tvalid),
-     .h2c_tready  (m_axis_h2c_tready),
-     .h2c_tlast   (m_axis_h2c_tlast),
-     .h2c_tuser_qid (m_axis_h2c_tuser_qid),
-     .h2c_tuser_port_id (m_axis_h2c_tuser_port_id),
-     .h2c_tuser_err (m_axis_h2c_tuser_err),
-     .h2c_tuser_mdata (m_axis_h2c_tuser_mdata),
-     .h2c_tuser_mty (m_axis_h2c_tuser_mty),
-     .h2c_tuser_zero_byte (m_axis_h2c_tuser_zero_byte),
-     .h2c_count   (h2c_count),
-     .h2c_match   (h2c_match),
-     .clr_match   (clr_h2c_match)
+  .BIT_WIDTH         ( C_DATA_WIDTH ),
+  .C_H2C_TUSER_WIDTH ( C_H2C_TUSER_WIDTH )
+  )
+  ST_h2c_0 (
+  .axi_aclk    (axi_aclk),
+  .axi_aresetn (axi_aresetn),
+//  .control_reg (32'h0),
+//  .control_run (1'b0),
+//  .h2c_txr_size(32'h0),
+  .perform_begin(perform_begin),
+  .read_addr(read_addr),
+  .rd_output(rd_output),
+  .timestamp(timestamp_counter),
+  .h2c_tdata   (m_axis_h2c_tdata),
+  .h2c_tvalid  (m_axis_h2c_tvalid),
+  .h2c_tready  (m_axis_h2c_tready),
+  .h2c_tlast   (m_axis_h2c_tlast),
+  .h2c_tuser_qid (m_axis_h2c_tuser_qid),
+  .h2c_tuser_port_id (m_axis_h2c_tuser_port_id),
+  .h2c_tuser_err (m_axis_h2c_tuser_err),
+  .h2c_tuser_mdata (m_axis_h2c_tuser_mdata),
+  .h2c_tuser_mty (m_axis_h2c_tuser_mty),
+  .h2c_tuser_zero_byte (m_axis_h2c_tuser_zero_byte),
+  .h2c_count   (h2c_count),
+  .h2c_match   (h2c_match),
+  .clr_match   (clr_h2c_match)
   );
 
    reg [C_DATA_WIDTH-1 :0]    m_axis_h2c_tdata_reg;
@@ -365,140 +384,100 @@ always @(posedge axi_aclk ) begin
 	  start_imm <= c2h_control[2] ? 1'b1 : s_axis_c2h_cmpt_tready ? 1'b0 : start_imm;
 end
 
-// always @(posedge axi_aclk ) begin
-//   if (~axi_aresetn) begin
-// 	  s_axis_c2h_tlast_nn1 <= 0;
-// 	  c2h_st_d1 <= 0;
-//   end
-//   else begin
-// 	  s_axis_c2h_tlast_nn1 <= s_axis_c2h_tlast;
-// 	  c2h_st_d1 <= c2h_control[1];
-//   end
-// end
+wire fifo_full, empty;
+logic rd_en, wr_en;
+wire [10:0] rd_out_qid;
+assign cmpt_tvalid = ~empty;
 
-
-  wire fifo_full, empty;
-  logic rd_en, wr_en;
-  wire [10:0] rd_out_qid;
-  assign cmpt_tvalid = ~empty;
-
-// always @(posedge axi_aclk ) begin
-//   if (~axi_aresetn) begin
-//     // cmpt_count <= 32'b0;
-//     // start_cmpt <= 0;
-//     wb_sm <= SM_IDL;
-//     cmpt_tvalid <= 0;
-//   end
-//   else 
-// 	  case (wb_sm)
-// 	    SM_IDL : begin
-//         if (c2h_perform & ~empty) begin
-//           wb_sm <= SM_S1;
-//           cmpt_tvalid <= 1;
-//         end
-// 	    end
-// 	    SM_S1 : 
-//         // if (start_cmpt & s_axis_c2h_cmpt_tready & (cmpt_count < c2h_num_pkt)) begin
-//         if (empty) begin
-//           cmpt_tvalid <= 0;
-//           wb_sm <= SM_IDL;
-//         end
-// 	    default : 
-// 	      wb_sm <= SM_IDL;
-// 	  endcase // case (wb_sm)
-// end
-
-   logic [15 : 0] cmp_par_val;  // fixed 512/32
-   // Completione size information
-   // cmpt_size[1:0] = 00 : 8Bytes of data 1 beat.
-   // cmpt_size[1:0] = 01 : 16Bytes of data 1 beat.
-   // cmpt_size[1:0] = 10 : 32Bytes of data 2 beat.
-   assign s_axis_c2h_cmpt_size = byp_to_cmp ? 2'b11 : cmpt_size[1:0];
+logic [15 : 0] cmp_par_val;  // fixed 512/32
+  // Completione size information
+  // cmpt_size[1:0] = 00 : 8Bytes of data 1 beat.
+  // cmpt_size[1:0] = 01 : 16Bytes of data 1 beat.
+  // cmpt_size[1:0] = 10 : 32Bytes of data 2 beat.
+assign s_axis_c2h_cmpt_size = byp_to_cmp ? 2'b11 : cmpt_size[1:0];
 //   assign s_axis_c2h_cmpt_dpar = 'd0;
-   assign s_axis_c2h_cmpt_dpar = ~cmp_par_val;
-   
-   always_comb begin
-      for (integer i=0; i< 16; i += 1) begin // 512/32 fixed.
-	      cmp_par_val[i] = ^s_axis_c2h_cmpt_tdata[i*32 +: 32];
-      end
-   end
-   wire cmpt_user_fmt;
-   assign cmpt_user_fmt = cmpt_size[2];  
+assign s_axis_c2h_cmpt_dpar = ~cmp_par_val;
+  
+always_comb begin
+  for (integer i=0; i< 16; i += 1) begin // 512/32 fixed.
+    cmp_par_val[i] = ^s_axis_c2h_cmpt_tdata[i*32 +: 32];
+  end
+end
+wire cmpt_user_fmt;
+assign cmpt_user_fmt = cmpt_size[2];  
 
-  assign rd_en = cmpt_tvalid & s_axis_c2h_cmpt_tready;
-  assign wr_en = rx_begin;
-  // assign rd_en = cmpt_and & (!cmpt_and_d1);
+assign rd_en = cmpt_tvalid & s_axis_c2h_cmpt_tready;
+assign wr_en = rx_begin;
 
-   xpm_fifo_sync # 
-    (
-      .FIFO_MEMORY_TYPE     ("block"), //string; "auto", "block", "distributed", or "ultra";
-      .ECC_MODE             ("no_ecc"), //string; "no_ecc" or "en_ecc";
-      .FIFO_WRITE_DEPTH     (128), //positive integer
-      .WRITE_DATA_WIDTH     (11), //positive integer
-      .WR_DATA_COUNT_WIDTH  (7), //positive integer
-      .PROG_FULL_THRESH     (10), //positive integer
-      .FULL_RESET_VALUE     (0), //positive integer; 0 or 1
-      .READ_MODE            ("fwft"), //string; "std" or "fwft";
-      .FIFO_READ_LATENCY    (1), //positive integer;
-      .READ_DATA_WIDTH      (11), //positive integer
-      .RD_DATA_COUNT_WIDTH  (7), //positive integer
-      .PROG_EMPTY_THRESH    (10), //positive integer
-      .DOUT_RESET_VALUE     ("0"), //string
-      .WAKEUP_TIME          (0) //positive integer; 0 or 2;
-    ) cmpt_qid_fifo (
-  .sleep           (1'b0),
-	.rst             (~axi_aresetn),
-	.wr_clk          (axi_aclk),
-	.wr_en           (wr_en),
-	.din             (c2h_qid),
-	.full            (fifo_full),
-	.prog_full       (),
-	.wr_data_count   (),
-	.overflow        (),
-	.wr_rst_busy     (),
-	.rd_en           (rd_en),
-	.dout            (rd_out_qid),
-	.empty           (empty),
-	.prog_empty      (),
-	.rd_data_count   (),
-	.underflow       (),
-	.rd_rst_busy     (),
-	.injectsbiterr   (1'b0),
-	.injectdbiterr   (1'b0),
-	.sbiterr         (),
-	.dbiterr         ()
-    );
+xpm_fifo_sync # 
+(
+  .FIFO_MEMORY_TYPE     ("block"), //string; "auto", "block", "distributed", or "ultra";
+  .ECC_MODE             ("no_ecc"), //string; "no_ecc" or "en_ecc";
+  .FIFO_WRITE_DEPTH     (512), //positive integer
+  .WRITE_DATA_WIDTH     (11), //positive integer
+  .WR_DATA_COUNT_WIDTH  (7), //positive integer
+  .PROG_FULL_THRESH     (10), //positive integer
+  .FULL_RESET_VALUE     (0), //positive integer; 0 or 1
+  .READ_MODE            ("fwft"), //string; "std" or "fwft";
+  .FIFO_READ_LATENCY    (1), //positive integer;
+  .READ_DATA_WIDTH      (11), //positive integer
+  .RD_DATA_COUNT_WIDTH  (7), //positive integer
+  .PROG_EMPTY_THRESH    (10), //positive integer
+  .DOUT_RESET_VALUE     ("0"), //string
+  .WAKEUP_TIME          (0) //positive integer; 0 or 2;
+) cmpt_qid_fifo (
+.sleep           (1'b0),
+.rst             (~axi_aresetn),
+.wr_clk          (axi_aclk),
+.wr_en           (wr_en),
+.din             (c2h_qid),
+.full            (fifo_full),
+.prog_full       (),
+.wr_data_count   (),
+.overflow        (),
+.wr_rst_busy     (),
+.rd_en           (rd_en),
+.dout            (rd_out_qid),
+.empty           (empty),
+.prog_empty      (),
+.rd_data_count   (),
+.underflow       (),
+.rd_rst_busy     (),
+.injectsbiterr   (1'b0),
+.injectdbiterr   (1'b0),
+.sbiterr         (),
+.dbiterr         ()
+);
 
-   // write back data format
-   // Standart format
-   // 0 : data format. 0 = standard format, 1 = user defined.
-   // [11:1] : QID
-   // [19:12] : // reserved
-   // [255:20] : User data.
-   // this format should be same for two cycle if type is [1] is set.
-   assign s_axis_c2h_cmpt_tdata =  byp_to_cmp ? {byp_data_to_cmp[511:4], 4'b0000} :
-				   start_imm ? {wb_dat[255:0],wb_dat[255:4], 4'b0000} :          // dsc used is not set
-   	  			   {wb_dat[255:0], wb_dat[255:20], c2h_st_len[15:0], 4'b1000};   // dsc used is set 
+  // write back data format
+  // Standart format
+  // 0 : data format. 0 = standard format, 1 = user defined.
+  // [11:1] : QID
+  // [19:12] : // reserved
+  // [255:20] : User data.
+  // this format should be same for two cycle if type is [1] is set.
+assign s_axis_c2h_cmpt_tdata =  byp_to_cmp ? {byp_data_to_cmp[511:4], 4'b0000} :
+        start_imm ? {wb_dat[255:0],wb_dat[255:4], 4'b0000} :          // dsc used is not set
+          {wb_dat[255:0], wb_dat[255:20], c2h_st_len[15:0], 4'b1000};   // dsc used is set 
 
-   assign s_axis_c2h_cmpt_tvalid = start_imm | cmpt_tvalid;
+assign s_axis_c2h_cmpt_tvalid = start_imm | cmpt_tvalid;
 
-   assign s_axis_c2h_cmpt_ctrl_qid = rd_out_qid;
-//   assign s_axis_c2h_cmpt_ctrl_cmpt_type = cmpt_size[13:12];
-   assign s_axis_c2h_cmpt_ctrl_cmpt_type = start_imm ? 2'b00 : cmpt_size[12] ? 2'b01 : 2'b11;
-   assign s_axis_c2h_cmpt_ctrl_wait_pld_pkt_id = cmpt_pkt_cnt[15:0];
-   assign s_axis_c2h_cmpt_ctrl_marker = c2h_control[5];    // C2H Marker Enabled
-   assign s_axis_c2h_cmpt_ctrl_user_trig = cmpt_size[3];
-   assign s_axis_c2h_cmpt_ctrl_col_idx = cmpt_size[6:4];
-   assign s_axis_c2h_cmpt_ctrl_err_idx = cmpt_size[10:8];
-   
-   always @(posedge axi_aclk) begin
-      if (~axi_aresetn) begin
-	      cmpt_pkt_cnt <= 1;
-      end
-      else begin
-	      cmpt_pkt_cnt <=  (s_axis_c2h_cmpt_tvalid & s_axis_c2h_cmpt_tready) & ~start_imm ? cmpt_pkt_cnt+1 : cmpt_pkt_cnt;
-      end
-   end
+assign s_axis_c2h_cmpt_ctrl_qid = rd_out_qid;
+assign s_axis_c2h_cmpt_ctrl_cmpt_type = start_imm ? 2'b00 : cmpt_size[12] ? 2'b01 : 2'b11;
+assign s_axis_c2h_cmpt_ctrl_wait_pld_pkt_id = cmpt_pkt_cnt[15:0];
+assign s_axis_c2h_cmpt_ctrl_marker = c2h_control[5];    // C2H Marker Enabled
+assign s_axis_c2h_cmpt_ctrl_user_trig = cmpt_size[3];
+assign s_axis_c2h_cmpt_ctrl_col_idx = cmpt_size[6:4];
+assign s_axis_c2h_cmpt_ctrl_err_idx = cmpt_size[10:8];
+  
+always @(posedge axi_aclk) begin
+  if (~axi_aresetn) begin
+    cmpt_pkt_cnt <= 1;
+  end
+  else begin
+    cmpt_pkt_cnt <=  (s_axis_c2h_cmpt_tvalid & s_axis_c2h_cmpt_tready) & ~start_imm ? cmpt_pkt_cnt+1 : cmpt_pkt_cnt;
+  end
+end
 /*
 // Marker responce from QSTS interface.
    assign qsts_out_rdy = 1'b1;   // ready is always asserted

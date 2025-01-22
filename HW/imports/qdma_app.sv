@@ -500,6 +500,8 @@ module qdma_app #(
   wire [31:0] cycles_per_pkt;
   wire [10:0] c2h_num_queue;
   wire c2h_perform;
+  wire [31:0] read_addr;
+  wire [31:0] rd_output;
 
   // The sys_rst_n input is active low based on the core configuration
   assign sys_resetn = sys_rst_n;
@@ -560,6 +562,8 @@ module qdma_app #(
       )
   user_control_i
     (
+      .rd_output(rd_output),
+      .read_addr(read_addr),
       .c2h_perform(c2h_perform),
       .c2h_qid(c2h_qid),
       .hash_val(hash_val),
@@ -771,6 +775,8 @@ module qdma_app #(
     )
   axi_st_module_i
     (
+      .rd_output(rd_output),
+      .read_addr(read_addr),
     .c2h_perform(c2h_perform),
     .c2h_num_queue(c2h_num_queue),
     .cycles_per_pkt(cycles_per_pkt),

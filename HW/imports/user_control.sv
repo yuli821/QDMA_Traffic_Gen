@@ -169,7 +169,9 @@ module user_control
 
     output [10:0] c2h_qid,
     input [31:0] hash_val,
-    output reg c2h_perform
+    output reg c2h_perform,
+    output [31:0] read_addr,
+    input [31:0] rd_output
     );
 
    reg [31:0] 	       control_reg_h2c;
@@ -227,6 +229,7 @@ module user_control
    // Interpreting request on the axilite master interface
    wire [31:0] wr_addr;
    wire [31:0] rd_addr;
+   assign read_addr = rd_addr;
    assign wr_addr = ((m_axil_awaddr >= PF0_PCIEBAR2AXIBAR) && (m_axil_awaddr < PF1_PCIEBAR2AXIBAR)) ? (m_axil_awaddr & PF0_M_AXILITE_ADDR_MSK) :
                     ((m_axil_awaddr >= PF1_PCIEBAR2AXIBAR) && (m_axil_awaddr < PF2_PCIEBAR2AXIBAR)) ? (m_axil_awaddr & PF1_M_AXILITE_ADDR_MSK) :
                     ((m_axil_awaddr >= PF2_PCIEBAR2AXIBAR) && (m_axil_awaddr < PF3_PCIEBAR2AXIBAR)) ? (m_axil_awaddr & PF2_M_AXILITE_ADDR_MSK) :
@@ -325,7 +328,7 @@ module user_control
          scratch_reg2 <=0;
          pfch_byp_tag_reg <= 0;
          c2h_st_buffsz<=16'h1000;  // default buff size 4K
-               dsc_bypass <= 6'h0;
+         dsc_bypass <= 6'h0;
          usr_irq <= 'h0;
          usr_irq_msk <= 'h0;
          usr_irq_num <= 'h0;
@@ -447,46 +450,49 @@ module user_control
 	c2h_status <= control_reg_c2h[5] & c2h_st_marker_rsp ? 1'b1 : control_reg_c2h[1] ? 1'b0 : c2h_status;
    end
    always_comb begin
-      case (rd_addr)
-	32'h00 : m_axil_rdata  = (32'h0 | c2h_st_qid[10:0]);
-	32'h04 : m_axil_rdata  = (32'h0 | c2h_st_len);
-	32'h08 : m_axil_rdata  = (32'h0 | control_reg_c2h[31:0]);
-	32'h0C : m_axil_rdata  = (32'h0 | control_reg_h2c[31:0]);
-	32'h10 : m_axil_rdata  = (32'h0 | {h2c_qid[10:0], h2c_crc_match, 1'b0, h2c_zero_byte_reg, h2c_match});
-	32'h14 : m_axil_rdata  = h2c_count;
-	32'h18 : m_axil_rdata  = {32'h0 | c2h_status};
-   32'h1C : m_axil_rdata  = cycles_per_pkt[31:0];
-	32'h20 : m_axil_rdata  = c2h_num_pkt[31:0];
-   32'h28 : m_axil_rdata = {32'h0 | c2h_num_queue};
-	32'h30 : m_axil_rdata  = wb_dat[31:0];
-	32'h34 : m_axil_rdata  = wb_dat[63:32];
-	32'h38 : m_axil_rdata  = wb_dat[95:64];
-	32'h3C : m_axil_rdata  = wb_dat[127:96];
-	32'h40 : m_axil_rdata  = wb_dat[159:128];
-	32'h44 : m_axil_rdata  = wb_dat[191:160];
-	32'h48 : m_axil_rdata  = wb_dat[223:192];
-	32'h4C : m_axil_rdata  = wb_dat[255:224];
-	32'h50 : m_axil_rdata  = cmpt_size[31:0];
-	32'h60 : m_axil_rdata  = scratch_reg1[31:0];
-	32'h64 : m_axil_rdata  = scratch_reg2[31:0];
-	32'h68 : m_axil_rdata  = single_bit_err_inject_reg[31:0];
-	32'h6C : m_axil_rdata  = double_bit_err_inject_reg[31:0];
-	32'h70 : m_axil_rdata  = {32'h0 | perf_ctl[4:0]};
-	32'h74 : m_axil_rdata  = data_count[31:0];
-	32'h78 : m_axil_rdata  = data_count[63:32];
-	32'h7C : m_axil_rdata  = valid_count[31:0];
-	32'h80 : m_axil_rdata  = valid_count[63:32];
-	32'h84 : m_axil_rdata  = c2h_st_buffsz[15:0];
-	32'h88 : m_axil_rdata  = {32'h0 | axis_pkt_drop[31:0]};
-	32'h8C : m_axil_rdata  = {32'h0 | axis_pkt_accept[31:0]};
-	32'h90 : m_axil_rdata  = {32'h0 | dsc_bypass[5:0]};
-	32'h94 : m_axil_rdata  = {32'h0 | usr_irq[16:0]};
-	32'h98 : m_axil_rdata  = {32'h0 | usr_irq_msk[31:0]};
-	32'h9C : m_axil_rdata  = {32'h0 | usr_irq_num[31:0]};
-	32'hA0 : m_axil_rdata  = {32'h0 | gen_qdma_reset};
-	32'hA4 : m_axil_rdata  = {32'h0 | vdm_msg_rd_dout};
-	32'hFFFFFFFF: m_axil_rdata = {32'h0 | invalid_axilm_addr};
-    default : m_axil_rdata  = m_axil_rdata_bram;
+   case (rd_addr)
+      32'h00 : m_axil_rdata  = (32'h0 | c2h_st_qid[10:0]);
+      32'h04 : m_axil_rdata  = (32'h0 | c2h_st_len);
+      32'h08 : m_axil_rdata  = (32'h0 | control_reg_c2h[31:0]);
+      32'h0C : m_axil_rdata  = (32'h0 | control_reg_h2c[31:0]);
+      32'h10 : m_axil_rdata  = (32'h0 | {h2c_qid[10:0], h2c_crc_match, 1'b0, h2c_zero_byte_reg, h2c_match});
+      32'h14 : m_axil_rdata  = h2c_count;
+      32'h18 : m_axil_rdata  = {32'h0 | c2h_status};
+      32'h1C : m_axil_rdata  = cycles_per_pkt[31:0];
+      32'h20 : m_axil_rdata  = c2h_num_pkt[31:0];
+      32'h28 : m_axil_rdata = {32'h0 | c2h_num_queue};
+      32'h30 : m_axil_rdata  = wb_dat[31:0];
+      32'h34 : m_axil_rdata  = wb_dat[63:32];
+      32'h38 : m_axil_rdata  = wb_dat[95:64];
+      32'h3C : m_axil_rdata  = wb_dat[127:96];
+      32'h40 : m_axil_rdata  = wb_dat[159:128];
+      32'h44 : m_axil_rdata  = wb_dat[191:160];
+      32'h48 : m_axil_rdata  = wb_dat[223:192];
+      32'h4C : m_axil_rdata  = wb_dat[255:224];
+      32'h50 : m_axil_rdata  = cmpt_size[31:0];
+      32'h60 : m_axil_rdata  = scratch_reg1[31:0];
+      32'h64 : m_axil_rdata  = scratch_reg2[31:0];
+      32'h68 : m_axil_rdata  = single_bit_err_inject_reg[31:0];
+      32'h6C : m_axil_rdata  = double_bit_err_inject_reg[31:0];
+      32'h70 : m_axil_rdata  = {32'h0 | perf_ctl[4:0]};
+      32'h74 : m_axil_rdata  = data_count[31:0];
+      32'h78 : m_axil_rdata  = data_count[63:32];
+      32'h7C : m_axil_rdata  = valid_count[31:0];
+      32'h80 : m_axil_rdata  = valid_count[63:32];
+      32'h84 : m_axil_rdata  = c2h_st_buffsz[15:0];
+      32'h88 : m_axil_rdata  = {32'h0 | axis_pkt_drop[31:0]};
+      32'h8C : m_axil_rdata  = {32'h0 | axis_pkt_accept[31:0]};
+      32'h90 : m_axil_rdata  = {32'h0 | dsc_bypass[5:0]};
+      32'h94 : m_axil_rdata  = {32'h0 | usr_irq[16:0]};
+      32'h98 : m_axil_rdata  = {32'h0 | usr_irq_msk[31:0]};
+      32'h9C : m_axil_rdata  = {32'h0 | usr_irq_num[31:0]};
+      32'hA0 : m_axil_rdata  = {32'h0 | gen_qdma_reset};
+      32'hA4 : m_axil_rdata  = {32'h0 | vdm_msg_rd_dout};
+      32'hFFFFFFFF: m_axil_rdata = {32'h0 | invalid_axilm_addr};
+      default : begin 
+         if (rd_addr >= 32'h2A8 && rd_addr <= 32'h12A4) m_axil_rdata = rd_output;
+         else m_axil_rdata  = m_axil_rdata_bram;
+      end
       endcase // case (m_axil_araddr[31:0]...
     end // always_comb begin
    reg perf_ctl_stp;

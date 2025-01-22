@@ -11,6 +11,7 @@ module traffic_gen #(
     input logic [31:0] control_reg,
     input logic [15:0] txr_size,
     input logic [31:0] num_pkt,
+    input logic [79:0] timestamp,
     // input logic [TM_DSC_BITS-1:0] credit_in,
     // input logic credit_updt,
     // input logic [TM_DSC_BITS-1:0] credit_perpkt_in,
@@ -101,7 +102,7 @@ always_ff @(posedge axi_aclk) begin
 end
 
 assign tm_dsc_sts_rdy = tm_ready;
-assign tm_update = tm_dsc_sts_vld & tm_ready & (tm_dsc_sts_qen | tm_dsc_sts_qinv ) & ~tm_dsc_sts_mm & tm_dsc_sts_dir;
+assign tm_update = tm_dsc_sts_vld & (tm_dsc_sts_qen | tm_dsc_sts_qinv ) & ~tm_dsc_sts_mm & tm_dsc_sts_dir;
 assign wr_conflict = tm_update & updt_crdt;
 assign rx_begin = rx_valid & ~rx_valid_d1;
 
@@ -112,15 +113,18 @@ always_comb begin
     wr_credit_qid = 0;
     wr_credit_en = 0;
     wr_credit_in = 0;
-    tm_ready = 1'b0;
+    tm_ready = 1'b1;
     case(curr_state_crdt)
         IDLE_CRDT: begin 
-            tm_ready = 1'b1;
+            // tm_ready = 1'b1;
             if (tm_update) begin 
+                tm_ready = 1'b0;
                 rd_credit_qid = tm_dsc_sts_qid;
             end else if (updt_crdt) begin 
-                rd_credit_qid = rx_qid_d1;
+                tm_ready = 1'b0;
+                rd_credit_qid = rx_qid;
             end else if (wr_conflict) begin //handle tm update first
+                tm_ready = 1'b0;
                 rd_credit_qid = tm_dsc_sts_qid;
             end 
             // else tm_ready = 1'b1;
@@ -129,9 +133,9 @@ always_comb begin
             wr_credit_en = 1'b1;
             wr_credit_qid = tm_dsc_sts_qid_d1;
             wr_credit_in = tm_dsc_sts_qinv_d1 ? 'h0 : rd_credit_out + tm_dsc_sts_avl_d1;
-            rd_credit_qid = rx_qid_d2;
+            // rd_credit_qid = rx_qid_d2;
             if (updt_crdt) begin 
-                // rd_credit_qid = rx_qid_d1;
+                rd_credit_qid = rx_qid;
                 if (tm_dsc_sts_qid_d1 == rx_qid_d1) wr_credit_in = tm_dsc_sts_qinv_d1 ? 'h0 : rd_credit_out + tm_dsc_sts_avl_d1 - 1;
             end
             // else if (wr_conflict_d1) rd_credit_qid = rx_qid_d2;
@@ -142,7 +146,7 @@ always_comb begin
         // end
         CRDT_UPDT: begin 
             wr_credit_en = 1'b1;
-            wr_credit_qid = rx_qid_d3;
+            wr_credit_qid = rx_qid_d1;
             wr_credit_in = rd_credit_out - 1;
             // if (tm_update) rd_credit_qid = tm_dsc_sts_qid;
             // else if (updt_crdt) rd_credit_qid = rx_qid_d1;
@@ -150,8 +154,8 @@ always_comb begin
         UPDT_CONFLICT: begin 
             wr_credit_en = 1'b1;
             wr_credit_qid = tm_dsc_sts_qid_d1;
-            rd_credit_qid = rx_qid_d2;
-            if (tm_dsc_sts_qid_d1 == rx_qid_d2) begin 
+            rd_credit_qid = rx_qid_d1;
+            if (tm_dsc_sts_qid_d1 == rx_qid_d1) begin 
                 wr_credit_in = tm_dsc_sts_qinv_d1 ? 'h0 : rd_credit_out + tm_dsc_sts_avl_d1 - 1;
             end else begin 
                 wr_credit_in = tm_dsc_sts_qinv_d1 ? 'h0 : rd_credit_out + tm_dsc_sts_avl_d1;
@@ -159,7 +163,7 @@ always_comb begin
         end
         UPDT_CONFLICT_D1: begin 
             wr_credit_en = 1'b1;
-            wr_credit_qid = rx_qid_d3;
+            wr_credit_qid = rx_qid_d2;
             wr_credit_in = rd_credit_out - 1;
         end
         // CRDT_UPDT_D1: begin 
@@ -336,7 +340,8 @@ always_comb begin
         // data_buf[111:0] = header_eth_buf;
         data_buf[RX_LEN-1 : RX_LEN-112] = header_eth_buf;
         data_buf[RX_LEN-113 : RX_LEN-272] = header_ip_buf;
-        data_buf[RX_LEN-273 : RX_LEN-432] = header_trans_buf;
+        data_buf[RX_LEN-273 : RX_LEN-432] = header_trans_buf;//total byte of header: 54
+        data_buf[RX_LEN-433:0] = timestamp;
     end
     if (signed'(counter_trans) >= signed'(tot_pkt_size - BYTES_PER_BEAT)) begin 
         // data_buf = data_buf << off;
@@ -358,7 +363,7 @@ always_comb begin
     // updt_random = 1'b0;
     case(curr_state) 
         IDLE: begin 
-            if (rx_ready & c2h_perform && crdt_valid) begin 
+            if (rx_ready && c2h_perform && crdt_valid) begin 
                 next_state = TRANSFER;
             end else begin 
                 next_state = IDLE;
@@ -379,8 +384,8 @@ always_comb begin
         end
         WAIT: begin 
             if (c2h_perform) begin 
-                if (crdt_valid & rx_ready && (counter_wait >= cycles_pkt-1)) begin //check credit
-                     next_state = TRANSFER;
+                if (crdt_valid && rx_ready && (counter_wait >= cycles_pkt-1)) begin //check credit
+                    next_state = TRANSFER;
                     // else begin 
                     //     next_state = WAIT;
                     //     updt_random = 1'b1;
@@ -455,7 +460,7 @@ always_ff @(posedge axi_aclk) begin
                     // if ((pkt_count == num_pkt) && (counter_wait >= cycles_pkt-1) ) begin 
                     //     counter_wait <= 0;
                     // end else 
-                    if (crdt_valid & (counter_wait >= cycles_pkt-1)) begin //check credit
+                    if (crdt_valid && (counter_wait >= cycles_pkt-1)) begin //check credit
                         counter_wait <= 0;
                         cycles_pkt <= (cycles_per_pkt > cycles_needed) ? cycles_per_pkt : cycles_needed;
                         // else counter_wait <= cycles_pkt - 4;
