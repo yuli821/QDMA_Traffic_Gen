@@ -37,5 +37,5 @@ test_RR.c: Forwarding timestamp. Output files: result/result_\[num_queue\].txt<b
 Output files are incremental.<br>
 Makefile_test: Makefile to compile the code, i.e. make -f Makefile_test RTE_TARGET=build; make -f Makefile_test RR RTE_TARGET=build<br>
 run.sh: Run experiment with different packet size and processor mask configuration.<br>
-Notice: the --main-lcoreid needs to be the last lcore id, i.e. if running with 12 lcores, the main lcoreid needs to be 11.
+Notice: the --main-lcoreid needs to be the last lcore id, i.e. if running with 12 lcores, the main lcoreid needs to be 11.<br>
 
