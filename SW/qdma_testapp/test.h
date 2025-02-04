@@ -36,6 +36,7 @@
 #define MARKER_RESPONSE_COMPLETION_BIT    0x1
 #define RSS_START 		0xA8 //128 entries
 // #define RSS_END 		0x2A4
+#define DATA_START      0xE8
 
 extern int num_ports;
 

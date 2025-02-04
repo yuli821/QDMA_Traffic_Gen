@@ -11,9 +11,10 @@ BRAM_SIZE ?= 131072
 
 # binary name
 APP = test
-
+APP1 = test_RR
 # all source are stored in SRCS-y
 SRCS-y := test.c pcierw.c
+SRCS-x := test_RR.c pcierw.c
 
 ifeq ($(CONFIG_RTE_LIBRTE_QDMA_GCOV),y)
   CFLAGS += -g -ftest-coverage -fprofile-arcs
@@ -26,9 +27,12 @@ $(error "no installation of DPDK found")
 endif
 
 all: shared
-.PHONY: shared static
+RR: shared1
+.PHONY: shared static shared1
 shared: build/$(APP)-shared
 	ln -sf $(APP)-shared build/$(APP)
+shared1: build/$(APP1)-shared
+	ln -sf $(APP1)-shared build/$(APP1)
 static: build/$(APP)-static
 	ln -sf $(APP)-static build/$(APP)
 
@@ -52,10 +56,11 @@ LDFLAGS += -lrte_net_qdma
 # for shared library builds, we need to explicitly link these PMDs
 LDFLAGS_SHARED += -lrte_net_qdma
 
-build/$(APP)-shared: $(SRCS-y) Makefile $(PC_FILE) | build
+build/$(APP)-shared: $(SRCS-y) Makefile_test $(PC_FILE) | build
 	$(CC) $(CFLAGS) $(SRCS-y) -o $@ $(LDFLAGS) $(LDFLAGS_SHARED)
-
-build/$(APP)-static: $(SRCS-y) Makefile $(PC_FILE) | build
+build/$(APP1)-shared: $(SRCS-x) Makefile_test $(PC_FILE) | build 
+	$(CC) $(CFLAGS) $(SRCS-x) -o $@ $(LDFLAGS) $(LDFLAGS_SHARED)
+build/$(APP)-static: $(SRCS-y) Makefile_test $(PC_FILE) | build
 	$(CC) $(CFLAGS) $(SRCS-y) -o $@ $(LDFLAGS) $(LDFLAGS_STATIC)
 
 build:

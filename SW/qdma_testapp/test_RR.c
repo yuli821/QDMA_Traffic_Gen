@@ -164,10 +164,10 @@ static int recv_pkt_single_core(input_arg_t* inputs) { // for each lcore
         while(core_to_q[idx][idx2] != -1) {
             // rte_delay_us(1);
             nb_rx = rte_eth_rx_burst(portid, core_to_q[idx][idx2], pkts, NUM_RX_PKTS);
-            // nb_tx = rte_eth_tx_burst(portid, core_to_q[idx][idx2], pkts, nb_rx);
+            nb_tx = rte_eth_tx_burst(portid, core_to_q[idx][idx2], pkts, nb_rx);
             packet_recv_per_core[idx] += nb_rx;
-            for (int i = 0; i < nb_rx; i++) {
-            // for (int i = nb_tx; i < nb_rx; i++) {
+            // for (int i = 0; i < nb_rx; i++) {
+            for (int i = nb_tx; i < nb_rx; i++) {
                 rte_pktmbuf_free(pkts[i]);
             }
             idx2++;
@@ -335,7 +335,7 @@ int main(int argc, char* argv[]) {
     prev_tsc = rte_rdtsc_precise();
     test_tsc = prev_tsc;
 
-    printf("num_lcore is %d, num_queue is %d\n", num_lcores-1, num_queues);
+    printf("num_lcore is %d, num_queue is %d\n", num_lcores, num_queues);
 
     // Monitor and print
     while(1){
@@ -345,7 +345,7 @@ int main(int argc, char* argv[]) {
         // print tput every 1s
         if (diff_tsc > hz) {
             number_pkts = 0;
-            for (int i = 0; i < num_lcores-1; i++) {
+            for (int i = 0; i < num_lcores - 1; i++) {
                 number_pkts += packet_recv_per_core[i];
                 printf("c%d %ld\n", i, packet_recv_per_core[i]);
             }
@@ -388,7 +388,7 @@ int main(int argc, char* argv[]) {
     // printf("Number of bytes: %ld ", pinfo[portid].buff_size * recvpkts);
     // printf("total latency: %lf\n", (double)diff_tsc/ (double)hz);
     char filename[100];
-    sprintf(filename, "./result/result_%d_rx_only.txt", num_queues);
+    sprintf(filename, "./result/result_%d.txt", num_queues);
     FILE* file = fopen(filename, "a");
     double average;
     for (i = 0 ; i < index ; i++) {
