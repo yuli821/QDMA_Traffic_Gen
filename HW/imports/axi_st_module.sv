@@ -171,13 +171,13 @@ module axi_st_module
    logic [31:0] 	       cmpt_pkt_cnt;
    logic 		       cmpt_tvalid;
    logic 		       start_cmpt;
-   logic rx_begin;
+   logic rx_begin, qid_fifo_full;
   //  logic [10:0]   c2h_qid;
 
 //   logic  m_axis_h2c_tready;
 //   logic [C_DATA_WIDTH-1 :0] s_axis_c2h_tdata;
 
-logic [79:0] timestamp_counter;
+logic [31:0] timestamp_counter;
 logic perform_begin, perform_d1;
 assign perform_begin = c2h_perform & ~perform_d1;
 
@@ -384,7 +384,7 @@ always @(posedge axi_aclk ) begin
 	  start_imm <= c2h_control[2] ? 1'b1 : s_axis_c2h_cmpt_tready ? 1'b0 : start_imm;
 end
 
-wire fifo_full, empty;
+wire empty;
 logic rd_en, wr_en;
 wire [10:0] rd_out_qid;
 assign cmpt_tvalid = ~empty;
@@ -415,13 +415,13 @@ xpm_fifo_sync #
   .ECC_MODE             ("no_ecc"), //string; "no_ecc" or "en_ecc";
   .FIFO_WRITE_DEPTH     (512), //positive integer
   .WRITE_DATA_WIDTH     (11), //positive integer
-  .WR_DATA_COUNT_WIDTH  (7), //positive integer
+  .WR_DATA_COUNT_WIDTH  (10), //positive integer
   .PROG_FULL_THRESH     (10), //positive integer
   .FULL_RESET_VALUE     (0), //positive integer; 0 or 1
   .READ_MODE            ("fwft"), //string; "std" or "fwft";
   .FIFO_READ_LATENCY    (1), //positive integer;
   .READ_DATA_WIDTH      (11), //positive integer
-  .RD_DATA_COUNT_WIDTH  (7), //positive integer
+  .RD_DATA_COUNT_WIDTH  (10), //positive integer
   .PROG_EMPTY_THRESH    (10), //positive integer
   .DOUT_RESET_VALUE     ("0"), //string
   .WAKEUP_TIME          (0) //positive integer; 0 or 2;
@@ -431,7 +431,7 @@ xpm_fifo_sync #
 .wr_clk          (axi_aclk),
 .wr_en           (wr_en),
 .din             (c2h_qid),
-.full            (fifo_full),
+.full            (qid_fifo_full),
 .prog_full       (),
 .wr_data_count   (),
 .overflow        (),

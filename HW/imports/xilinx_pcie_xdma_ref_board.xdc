@@ -143,3 +143,22 @@ set_property BITSTREAM.GENERAL.COMPRESS true [current_design]
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+set_property LOC SLICE_X116Y293 [get_cells {qdma_app_i/axi_st_module_i/traffic_gen_c2h/hash_value/hash_reg[0]_rep__1_replica_5}]
+set_property LOC SLICE_X111Y293 [get_cells {qdma_app_i/axi_st_module_i/traffic_gen_c2h/hash_value/hash_reg[1]_rep__1_replica_9}]
+
+

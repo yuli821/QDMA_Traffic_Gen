@@ -221,10 +221,10 @@ module user_control
    reg h2c_zero_byte_reg;
    wire reg_x10_read;
    reg [31:0] pfch_byp_tag_reg;
-   wire [6:0] hash_idx;
-   assign hash_idx = hash_val[6:0];
+   wire [3:0] hash_idx;
+   assign hash_idx = hash_val[3:0];
    // reg [31:0] c2h_num_queue;
-   reg [31:0] rss_indir_table [128];
+   reg [31:0] rss_indir_table [0:15];
    assign c2h_qid = rss_indir_table[hash_idx];
    // Interpreting request on the axilite master interface
    wire [31:0] wr_addr;
@@ -337,11 +337,11 @@ module user_control
          single_bit_err_inject_reg <= 32'h0;
          double_bit_err_inject_reg <= 32'h0;
          c2h_num_queue <= 32'b1;
-         for (int i = 0 ; i < 128 ; i= i+1) 
+         for (int i = 0 ; i < 16 ; i= i+1) 
             rss_indir_table[i] <= 0;
       end
       else if (m_axil_wvalid && m_axil_wready ) begin
-         if (wr_addr >= 32'hA8 && wr_addr <= 32'h2A4) begin
+         if (wr_addr >= 32'hA8 && wr_addr <= 32'hE4) begin
             rss_indir_table[(wr_addr - 32'hA8) >> 2] <= m_axil_wdata; //(wr_addr - A4)/4 is the index, program the indirection table
          end else begin
             case (wr_addr)
@@ -490,7 +490,7 @@ module user_control
       32'hA4 : m_axil_rdata  = {32'h0 | vdm_msg_rd_dout};
       32'hFFFFFFFF: m_axil_rdata = {32'h0 | invalid_axilm_addr};
       default : begin 
-         if (rd_addr >= 32'h2A8 && rd_addr <= 32'h12A4) m_axil_rdata = rd_output;
+         if (rd_addr >= 32'hE8 && rd_addr <= 32'h8E4) m_axil_rdata = rd_output;
          else m_axil_rdata  = m_axil_rdata_bram;
       end
       endcase // case (m_axil_araddr[31:0]...

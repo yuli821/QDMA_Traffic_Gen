@@ -76,7 +76,7 @@ module ST_h2c #
       input   [5:0]  h2c_tuser_mty, 
       input          h2c_tuser_zero_byte, 
       input  clr_match,
-      input [79:0] timestamp,
+      input [31:0] timestamp,
       input perform_begin,
       input [31:0] read_addr,
       output [31:0] rd_output,
@@ -91,8 +91,8 @@ localparam PAT_INC = (PATT_WIDTH == 16) ? ((BIT_WIDTH == 64 ) ? 4 : (BIT_WIDTH =
                                              :((BIT_WIDTH == 64 ) ? 8 : (BIT_WIDTH == 128 ) ? 16 : (BIT_WIDTH == 256 ) ? 32 : 64); // Total bytes per beat
 localparam TCQ = 1;
    
-reg [31:0] dat[0:1023]; //64 * 1024
-reg [9:0] idx;
+reg [31:0] dat[0:511]; //64 * 1024
+reg [8:0] idx;
 wire tkeep_all1;
 wire tkeep_half1;
 wire tkeep_all0;
@@ -108,10 +108,11 @@ reg [15:0] 	       bp_lfsr;
 wire 	       bp_lfsr_net;
 wire 	       loopback_st;
 wire 	       back_pres;
+logic is_header;
 // wire [5:0] 	       emt_eop = h2c_tuser_mty[5:0];
 // wire [5:0] 	       emt_sop = 6'b0;
 wire  	       zero_byte = h2c_tuser_zero_byte;
-
+assign rd_output = dat[(read_addr - 32'hE8) >> 2];
 
 // Tuser formate
 // [10:0] Qid
@@ -189,10 +190,16 @@ end
 always @(posedge axi_aclk) begin 
   if (~axi_aresetn || perform_begin) begin 
     idx <= 0;
-    for (integer j = 0 ; j < 1024 ; j++) dat[j] <= #TCQ 0;
+    is_header <= 1'b1;
+    for (integer j = 0 ; j < 512 ; j++) dat[j] <= #TCQ 0;
   end
-  else if (h2c_tvalid && h2c_tready && ~h2c_tvalid_t1) begin //first beat, header field
-    dat[idx] <= signed'(timestamp - h2c_tdata[BIT_WIDTH-433:0]) > 0 ? timestamp - h2c_tdata[BIT_WIDTH-433:0] : 1 << 80 - h2c_tdata[BIT_WIDTH-433:0] + timestamp;
+  else if (h2c_tvalid && h2c_tready) begin //first beat, header field
+    if (is_header) begin
+      dat[idx] <= (timestamp > h2c_tdata[79:48]) ? timestamp - h2c_tdata[79:48] : ~h2c_tdata[79:48]  + 1 + timestamp;
+      idx <= idx+1;
+      if (h2c_tlast) is_header <= 1'b1;
+      else           is_header <= 1'b0;
+    end else if (h2c_tlast) is_header <= 1'b1;
   end
 end
 
