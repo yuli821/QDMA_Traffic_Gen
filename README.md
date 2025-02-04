@@ -29,3 +29,13 @@ QDMA IP setting: <br>
         num_pkt <- ignored for now<br>
         cycles_per_pkt <- if lowered than the minimum required cycles per pkt, will be replaced by the minimum cycles_per_pkt<br>
         e.g. sudo ./build/test -c 0xf -n 4 0 4 4096 0 0 : 4 c2h queues are used to receive pkts, each pkt contains 4kB, will run the recv function for 0.5s, each pkt takes 4096/64 + 3 hardware cycles to generate (the +3 is hardware logic to update credit), each cycle is 4ns. Therefore, the target throughput should theoretically be 122 Gbps.</p>
+
+## File specification:
+
+test.c: Throughput measurement. Output files: result/result_\[num_queue\]_rx_only.txt<br>
+test_RR.c: Forwarding timestamp. Output files: result/result_\[num_queue\].txt<br>
+Output files are incremental.<br>
+Makefile_test: Makefile to compile the code, i.e. make -f Makefile_test RTE_TARGET=build; make -f Makefile_test RR RTE_TARGET=build<br>
+run.sh: Run experiment with different packet size and processor mask configuration.<br>
+Notice: the --main-lcoreid needs to be the last lcore id, i.e. if running with 12 lcores, the main lcoreid needs to be 11.
+
