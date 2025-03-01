@@ -28,7 +28,8 @@
 int test_finished = 0;
 int num_ports;
 struct port_info pinfo[QDMA_MAX_PORTS];
-uint64_t packet_recv_per_core[64];
+uint64_t packet_recv_per_core[16];
+unsigned int table[100][512];
 
 unsigned int num_lcores;
 int* recv_pkts;
@@ -74,7 +75,7 @@ int port_init(int portid, int num_queues, int st_queues, int nb_descs, int buff_
     * CACHE_FLUSHTHRESH_MULTIPLIER (1.5) is defined in a C file, so using a
     * constant number 2 instead.
     */
-    nb_buff = RTE_MAX(nb_buff, MP_CACHE_SZ * 2);
+    // nb_buff = RTE_MAX(nb_buff, MP_CACHE_SZ * 2);
 
     mbuf_pool = rte_pktmbuf_pool_create(pinfo[portid].mem_pool, nb_buff, MP_CACHE_SZ, 0, buff_size + RTE_PKTMBUF_HEADROOM, rte_socket_id());
 
@@ -163,7 +164,7 @@ static int recv_pkt_single_core(input_arg_t* inputs) { // for each lcore
         idx2 = 0;
         while(core_to_q[idx][idx2] != -1) {
             // rte_delay_us(1);
-            nb_rx = rte_eth_rx_burst(portid, core_to_q[idx][idx2], pkts, NUM_RX_PKTS);
+            nb_rx = rte_eth_rx_burst(portid, core_to_q[idx][idx2], pkts, 1);
             nb_tx = rte_eth_tx_burst(portid, core_to_q[idx][idx2], pkts, nb_rx);
             packet_recv_per_core[idx] += nb_rx;
             // for (int i = 0; i < nb_rx; i++) {
@@ -264,31 +265,40 @@ int main(int argc, char* argv[]) {
         lcore_q_map[i] = pp;
     }
     for (int x = 0 ; x < q_per_core ; x++) {
-        for (idx = 0 ; idx < num_lcores ; idx++) {
+        for (idx = 0 ; idx < num_lcores-1 ; idx++) {
             if (q_count < (num_queues+pinfo[portid].queue_base)) {
                 lcore_q_map[idx][x] = q_count;
                 q_count++;
             } else {
                 lcore_q_map[idx][x] = -1;
             }
+            printf("%d\n", lcore_q_map[idx][x]);
         }
     }
 
     qbase = pinfo[portid].queue_base;
     
     int size;
-    double tot_time = 0;
-    double time;
     double pkts_per_second, throughput_gbps;
     user_bar_idx = pinfo[portid].user_bar_idx;
 
     // reg_val = PciRead(user_bar_idx, C2H_CONTROL_REG, portid);
     // reg_val &= C2H_CONTROL_REG_MASK;
     // loopback_en = reg_val & ST_LOOPBACK_EN;
-
-    int qid = 0;
-    for (i = 0 ; i < 128 ; i++) {
-        PciWrite(user_bar_idx, RSS_START + (i*4), qid+qbase, portid);
+    srand(time(NULL));
+    int qid = 0, qid1=0;
+    for (i = 0 ; i < 16 ; i++) {
+        // if (i < 8) {
+        //     PciWrite(user_bar_idx, RSS_START + (i*4), qbase, portid);
+        // } else if (i < 12) {
+        //     PciWrite(user_bar_idx, RSS_START + (i*4), 1+qbase, portid);
+        // } else if (i < 15) {
+        //     PciWrite(user_bar_idx, RSS_START + (i*4), 2+qbase, portid);
+        // } else {
+        //     PciWrite(user_bar_idx, RSS_START + (i*4), 3+qbase, portid);
+        // }
+        PciWrite(user_bar_idx, RSS_START + (i*4), qbase, portid);
+        // qid = rand() % num_queues;
         qid = (qid + 1) % num_queues;
     }
 
@@ -331,32 +341,50 @@ int main(int argc, char* argv[]) {
     uint64_t number_pkts = 0, number_pkts_prev = 0;
     uint64_t hz = rte_get_timer_hz();
     uint64_t interval_cycles = 10 * hz;
-
+    // printf("%ld\n", hz);
+    uint64_t ms = 0.1*hz; //1ms 
+    bool first = true;
     prev_tsc = rte_rdtsc_precise();
     test_tsc = prev_tsc;
-
-    printf("num_lcore is %d, num_queue is %d\n", num_lcores, num_queues);
-
     // Monitor and print
     while(1){
         cur_tsc = rte_rdtsc_precise();
         diff_tsc = cur_tsc - prev_tsc;
 
-        // print tput every 1s
-        if (diff_tsc > hz) {
-            number_pkts = 0;
-            for (int i = 0; i < num_lcores - 1; i++) {
-                number_pkts += packet_recv_per_core[i];
-                printf("c%d %ld\n", i, packet_recv_per_core[i]);
+        // print tput every 1ms
+        if (diff_tsc > ms) {
+            for (i = 0; i < 512; i++) {
+                // number_pkts += packet_recv_per_core[i];
+                // printf("c%d %ld\n", i, packet_recv_per_core[i]);
+                table[index][i] = PciRead(user_bar_idx, DATA_START+i*4, portid);
+                
+                // table[index][i] = reg_val;
             }
-            rate = (double)(number_pkts - number_pkts_prev) * max_completion_size * 8.0 / (double)diff_tsc * (double)hz / 1000000000.0;
-            printf("Throughput is %lf Gbps\n", rate);
+            // number_pkts = 0;
+            // for (i = qbase ; i < (qbase + num_lcores-1) ; i++) {
+            //     number_pkts += packet_recv_per_core[i];
+            //     // printf("c%d %ld\n", i, packet_recv_per_core[i]);
+            // }
+            // rate = (double)(number_pkts - number_pkts_prev) * max_completion_size * 8.0 / (double)diff_tsc * (double)hz / 1000000000.0;
+            // printf("Throughput is %lf Gbps\n", rate);
+            // number_pkts_prev = number_pkts;
+            // arr[index] = rate;
             prev_tsc = cur_tsc;
-            number_pkts_prev = number_pkts;
-            arr[index] = rate;
             index++;
+            // if (cur_tsc - test_tsc < 5*hz) {
+            //     for (i = 0 ; i < 16 ; i++) {
+            //         PciWrite(user_bar_idx, RSS_START + (i*4), qid1+qbase, portid);
+            //     }
+            //     qid1 = (qid1 + 1) % num_queues;
+            // }
         }
-
+        // if ((cur_tsc - test_tsc >= 5 * hz) && first) {
+        //     first = false;
+        //     for (i = 0 ; i < 16 ; i++) {
+        //         PciWrite(user_bar_idx, RSS_START + (i*4), qid+qbase, portid);
+        //         qid = (qid + 1) % num_queues;
+        //     }
+        // }
         if (cur_tsc - test_tsc >= interval_cycles) {
             test_finished = 1;
             break;
@@ -388,22 +416,52 @@ int main(int argc, char* argv[]) {
     // printf("Number of bytes: %ld ", pinfo[portid].buff_size * recvpkts);
     // printf("total latency: %lf\n", (double)diff_tsc/ (double)hz);
     char filename[100];
-    sprintf(filename, "./result/result_%d.txt", num_queues);
-    FILE* file = fopen(filename, "a");
-    double average;
-    for (i = 0 ; i < index ; i++) {
-        average += arr[i];
-    }
-    average = average/(1.0*index);
-    fprintf(file, "%lf\n", average);
-    fclose(file);
-    // sprintf(filename, "./result/round_trip_%d.txt", max_completion_size);
-    // FILE* file1 = fopen(filename, "w");
-    // for (i = 0 ; i < 512 ; i++) {
-    //     reg_val = PciRead(user_bar_idx, DATA_START+i*4, portid);
-    //     fprintf(file1, "%u\n", reg_val);
+    // sprintf(filename, "./result/result_%d.txt", num_queues);
+    // FILE* file = fopen(filename, "a");
+    // double average;
+    // for (i = 0 ; i < index ; i++) {
+    //     average += arr[i];
     // }
-    // fclose(file1);
+    // average = average/(1.0*index);
+    // fprintf(file, "%lf\n", average);
+    // fclose(file);
+    sprintf(filename, "./result/round_trip_%d.txt", max_completion_size);
+    FILE* file1 = fopen(filename, "w");
+    int max1, max2, max3, max4, max5, max6;
+    for (i = 0 ; i < 99 ; i++) {
+        // reg_val = PciRead(user_bar_idx, DATA_START+i*4, portid);
+        // max1 = 0;
+        // max2 = 0;
+        // max3 = 0;
+        // max4 = 0;
+        // max5 = 0;
+        // max6 = 0;
+        for (j = 0 ; j < 512 ; j++) {
+            // if (max1 < table[i][j]) {
+            //     max6 = max5;
+            //     max5 = max4;
+            //     max4 = max3;
+            //     max3 = max2;
+            //     max2 = max1;
+            //     max1 = table[i][j];
+            // }
+            fprintf(file1, "%d\n", table[i][j]);
+        }
+        // if (max6 != 0) {
+        //     fprintf(file1, "%d\n", max6);
+        // } else if (max5 != 0) {
+        //     fprintf(file1, "%d\n", max5);
+        // } else if (max4 != 0) {
+        //     fprintf(file1, "%d\n", max4);
+        // } else if (max3 != 0) {
+        //     fprintf(file1, "%d\n", max3);
+        // } else if (max2 != 0) {
+        //     fprintf(file1, "%d\n", max2);
+        // } else {
+        //     fprintf(file1, "%d\n", max1);
+        // }
+    }
+    fclose(file1);
 
     rte_eth_dev_stop(portid);
 
