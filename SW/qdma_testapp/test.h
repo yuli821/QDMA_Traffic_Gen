@@ -2,7 +2,7 @@
 
 #define PORT_0 0
 
-#define NUM_DESC_PER_RING 1024
+#define NUM_DESC_PER_RING 2048
 
 #define NUM_RX_PKTS (NUM_DESC_PER_RING-1)
 //#define NUM_RX_PKTS 32
@@ -38,6 +38,10 @@
 // #define RSS_END 		0x2A4
 #define DATA_START      0xE8
 
+#define BURST_SIZE 128
+#define MBUF_SIZE 2048
+#define CHANGE_INDRECT_TABLE 0
+
 extern int num_ports;
 
 struct port_info {
@@ -53,4 +57,190 @@ struct port_info {
 	char mem_pool[RTE_MEMPOOL_NAMESIZE];
 };
 
+typedef struct input_arg {
+    int** core_to_q;
+    int numpkts;
+    int portid;
+} input_arg_t;
+
 extern struct port_info pinfo[QDMA_MAX_PORTS];
+
+int port_init(int portid, int num_queues, int st_queues, uint16_t nb_descs, int buff_size)
+{
+    struct rte_mempool *mbuf_pool;
+    struct rte_eth_conf port_conf;
+    struct rte_eth_txconf tx_conf;
+    struct rte_eth_rxconf rx_conf;
+    int diag, x;
+    uint32_t queue_base, nb_buff;
+
+    printf("Setting up port :%d.\n", portid);
+    int socket_id = rte_eth_dev_socket_id(portid);
+
+    if (rte_pmd_qdma_get_device(portid) == NULL) {
+        printf("Port id %d already removed. Relaunch application to use the port again\n", portid);
+        return -1;
+    }
+
+    snprintf(pinfo[portid].mem_pool, RTE_MEMPOOL_NAMESIZE, MBUF_POOL_NAME_PORT, portid);
+
+    /* Mbuf packet pool */
+    nb_buff = ((nb_descs) * num_queues * 2);
+
+    /* NUM_TX_PKTS should be added to every queue as that many descriptors
+    * can be pending with application after Rx processing but before
+    * consumed by application or sent to Tx
+    */
+    nb_buff += ((NUM_TX_PKTS) * num_queues);
+
+    /*
+    * rte_mempool_create_empty() has sanity check to refuse large cache
+    * size compared to the number of elements.
+    * CACHE_FLUSHTHRESH_MULTIPLIER (1.5) is defined in a C file, so using a
+    * constant number 2 instead.
+    */
+    // nb_buff = RTE_MAX(nb_buff, MP_CACHE_SZ * 2);
+
+    mbuf_pool = rte_pktmbuf_pool_create(pinfo[portid].mem_pool, nb_buff, MP_CACHE_SZ, 0, buff_size + RTE_PKTMBUF_HEADROOM, rte_socket_id());
+
+    if (mbuf_pool == NULL)
+        rte_exit(EXIT_FAILURE, " Cannot create mbuf pkt-pool\n");
+
+    /*
+    * Make sure the port is configured. Zero everything and
+    * hope for sane defaults
+    */
+    memset(&port_conf, 0x0, sizeof(struct rte_eth_conf));
+    memset(&tx_conf, 0x0, sizeof(struct rte_eth_txconf));
+    memset(&rx_conf, 0x0, sizeof(struct rte_eth_rxconf));
+    diag = rte_pmd_qdma_get_bar_details(portid, &(pinfo[portid].config_bar_idx), &(pinfo[portid].user_bar_idx), &(pinfo[portid].bypass_bar_idx));
+
+    if (diag < 0)
+        rte_exit(EXIT_FAILURE, "rte_pmd_qdma_get_bar_details failed\n");
+
+    printf("QDMA Config bar idx: %d\n", pinfo[portid].config_bar_idx);
+    printf("QDMA AXI Master Lite bar idx: %d\n", pinfo[portid].user_bar_idx);
+    printf("QDMA AXI Bridge Master bar idx: %d\n", pinfo[portid].bypass_bar_idx);
+
+    /* configure the device to use # queues */
+    diag = rte_eth_dev_configure(portid, num_queues, num_queues, &port_conf);
+    if (diag < 0)
+        rte_exit(EXIT_FAILURE, "Cannot configure port %d (err=%d)\n", portid, diag);
+
+    // Adjust number of descriptors
+    diag = rte_eth_dev_adjust_nb_rx_tx_desc(portid, &nb_descs, &nb_descs);
+    if (diag != 0) {
+        fprintf(stderr, "rte_eth_dev_adjust_nb_rx_tx_desc failed\n");
+        return diag;
+    }
+
+    diag = rte_pmd_qdma_get_queue_base(portid, &queue_base);
+    if (diag < 0)
+        rte_exit(EXIT_FAILURE, "rte_pmd_qdma_get_queue_base : Querying of QUEUE_BASE failed\n");
+
+    pinfo[portid].queue_base = queue_base;
+    pinfo[portid].num_queues = num_queues;
+    pinfo[portid].st_queues = st_queues;
+    pinfo[portid].buff_size = buff_size;
+    pinfo[portid].nb_descs = nb_descs;
+
+    for (x = 0; x < num_queues; x++) {
+        if (x < st_queues) {
+            diag = rte_pmd_qdma_set_queue_mode(portid, x, RTE_PMD_QDMA_STREAMING_MODE);
+            if (diag < 0)
+                rte_exit(EXIT_FAILURE, "rte_pmd_qdma_set_queue_mode : Passing of QUEUE_MODE failed\n");
+        } else {
+            diag = rte_pmd_qdma_set_queue_mode(portid, x, RTE_PMD_QDMA_MEMORY_MAPPED_MODE);
+            if (diag < 0)
+                rte_exit(EXIT_FAILURE, "rte_pmd_qdma_set_queue_mode : Passing of QUEUE_MODE failed\n");
+        }
+
+        diag = rte_eth_tx_queue_setup(portid, x, nb_descs, socket_id, &tx_conf);
+        if (diag < 0)
+            rte_exit(EXIT_FAILURE, "Cannot setup port %d TX Queue id:%d (err=%d)\n", portid, x, diag);
+        rx_conf.rx_thresh.wthresh = DEFAULT_RX_WRITEBACK_THRESH;
+        diag = rte_eth_rx_queue_setup(portid, x, nb_descs, socket_id, &rx_conf, mbuf_pool);
+        if (diag < 0)
+            rte_exit(EXIT_FAILURE, "Cannot setup port %d RX Queue 0 (err=%d)\n", portid, diag);
+    }
+    rte_pmd_qdma_set_c2h_descriptor_prefetch(portid, 0, 1);
+    // rte_pmd_qdma_set_cmpt_trigger_mode(portid, 0, RTE_PMD_QDMA_TRIG_MODE_EVERY);
+
+    diag = rte_eth_dev_start(portid);
+    if (diag < 0)
+        rte_exit(EXIT_FAILURE, "Cannot start port %d (err=%d)\n", portid, diag);
+
+    return 0;
+}
+
+extern int port, num_queues, stqueues, pktsize, numpkts, cycles, interval;
+
+struct option long_options[] = {
+    {"port",        required_argument,  0,  'p'},
+    {"num_queues",  required_argument,  0,  'q'},
+    {"stqueues",    required_argument,  0,  'Q'},
+    {"pktsize",     required_argument,  0,  's'},
+    {"numpkts",     required_argument,  0,  'n'},
+    {"cycles",  	required_argument,  0,  'c'},
+    {"interval",  	required_argument,  0,  'i'},
+    {"help",        no_argument,        0,  'h'},
+    {0,             0,                  0,  0  }
+};
+
+static int parse_args(int argc, char **argv) {
+    char short_options[] = "p:q:Q:s:n:c:i:h";
+    char *prgname = argv[0];
+    int nb_required_args = 0;
+    int retval;
+
+    while (1) {
+        int c = getopt_long(argc, argv, short_options, long_options, NULL);
+
+        if (c == -1) {
+            break;
+        }
+		char **endptr;
+
+        switch (c) {
+        case 'p':
+    		port = (uint16_t)strtol(optarg, endptr, 10);
+            break;
+
+        case 'q':
+			num_queues = (uint16_t)strtol(optarg, endptr, 10);
+            break;
+
+        case 'Q':
+			stqueues = (uint16_t)strtol(optarg, endptr, 10);
+            break;
+
+        case 's':
+			pktsize = (uint16_t)strtol(optarg, endptr, 10);
+            break;
+
+        case 'n':
+			numpkts = (uint16_t)strtol(optarg, endptr, 10);
+            break;
+
+        case 'c':
+			cycles = (uint16_t)strtol(optarg, endptr, 10);
+            break;
+
+        case 'i':
+			interval = (uint16_t)strtol(optarg, endptr, 10);
+            break;
+
+        case 'h':
+        default:
+            // print_usage(prgname);
+            return -1;
+        }
+    }
+
+    if (optind >= 0) {
+        argv[optind - 1] = prgname;
+    }
+    optind = 1;
+
+    return 0;
+}

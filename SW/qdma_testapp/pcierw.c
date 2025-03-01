@@ -38,7 +38,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <rte_ethdev.h>
-#include "../../../drivers/net/qdma/rte_pmd_qdma.h"
+#include "/home/yuli9/qdma_ip_driver/QDMA/DPDK/drivers/net/qdma/rte_pmd_qdma.h"
 
 
 #include "pcierw.h"
