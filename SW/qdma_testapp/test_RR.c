@@ -136,7 +136,7 @@ int main(int argc, char* argv[]) {
     /* Allocate aligned mezone */
     rte_pmd_qdma_compat_memzone_reserve_aligned();
 
-    ret = port_init(port, num_queues, stqueues, numdescs, 2048);
+    ret = port_init(port, num_queues, stqueues, numdescs, MBUF_SIZE);
 
     mp = rte_mempool_lookup(pinfo[port].mem_pool);
 

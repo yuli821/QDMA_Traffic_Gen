@@ -67,7 +67,7 @@ static int recv_pkt_single_core(input_arg_t* inputs) { // for each lcore
         idx2 = 0;
         while(core_to_q[idx][idx2] != -1) {
             // rte_delay_us(1);
-            nb_rx = rte_eth_rx_burst(portid, core_to_q[idx][idx2], pkts, NUM_RX_PKTS);
+            nb_rx = rte_eth_rx_burst(portid, core_to_q[idx][idx2], pkts, BURST_SIZE);
             // nb_tx = rte_eth_tx_burst(portid, core_to_q[idx][idx2], pkts, nb_rx);
             packet_recv_per_core[idx] += nb_rx;
             for (int i = 0; i < nb_rx; i++) {
@@ -132,7 +132,7 @@ int main(int argc, char* argv[]) {
     /* Allocate aligned mezone */
     rte_pmd_qdma_compat_memzone_reserve_aligned();
 
-    ret = port_init(port, num_queues, stqueues, numdescs, 4096);
+    ret = port_init(port, num_queues, stqueues, numdescs, MBUF_SIZE);
 
     mp = rte_mempool_lookup(pinfo[port].mem_pool);
 

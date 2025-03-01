@@ -2,7 +2,7 @@
 
 #define PORT_0 0
 
-#define NUM_DESC_PER_RING 1024
+#define NUM_DESC_PER_RING 2048
 
 #define NUM_RX_PKTS (NUM_DESC_PER_RING-1)
 //#define NUM_RX_PKTS 32
@@ -38,7 +38,9 @@
 // #define RSS_END 		0x2A4
 #define DATA_START      0xE8
 
-#define BURST_SIZE 4
+#define BURST_SIZE 128
+#define MBUF_SIZE 2048
+#define CHANGE_INDRECT_TABLE 0
 
 extern int num_ports;
 
