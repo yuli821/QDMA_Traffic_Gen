@@ -156,7 +156,7 @@ int main(int argc, char* argv[]) {
     user_bar_idx = pinfo[port].user_bar_idx;
 
     int qid = 0;
-    for (i = 0 ; i < 128 ; i++) {
+    for (i = 0 ; i < 16 ; i++) {
         PciWrite(user_bar_idx, RSS_START + (i*4), qid+qbase, port);
         qid = (qid + 1) % num_queues;
     }
