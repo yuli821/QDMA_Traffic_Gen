@@ -1,3 +1,28 @@
+#include <rte_eal.h> /**> rte_eal_init */
+#include <rte_debug.h> /**> for rte_panic */
+#include <rte_ethdev.h> /**> rte_eth_rx_burst */
+#include <rte_errno.h> /**> rte_errno global var */
+#include <rte_memzone.h> /**> rte_memzone_dump */
+#include <rte_memcpy.h>
+#include <rte_malloc.h>
+#include <rte_cycles.h>
+#include <rte_log.h>
+#include <rte_string_fns.h>
+#include <rte_spinlock.h>
+#include <rte_mbuf.h>
+#include <rte_timer.h>
+
+#include <string.h>
+#include <stdio.h>
+#include <unistd.h>
+#include <getopt.h>
+#include <fcntl.h>
+#include <time.h>
+
+#include "/home/yuli9/qdma_ip_driver/QDMA/DPDK/drivers/net/qdma/rte_pmd_qdma.h"
+#include "pcierw.h"
+#include "qdma_regs.h"
+
 #define QDMA_MAX_PORTS	256
 
 #define PORT_0 0
@@ -38,7 +63,7 @@
 // #define RSS_END 		0x2A4
 #define DATA_START      0xE8
 
-#define BURST_SIZE 128
+#define BURST_SIZE 1
 #define MBUF_SIZE 2048
 #define CHANGE_INDRECT_TABLE 0
 
@@ -92,14 +117,6 @@ int port_init(int portid, int num_queues, int st_queues, uint16_t nb_descs, int 
     * consumed by application or sent to Tx
     */
     nb_buff += ((NUM_TX_PKTS) * num_queues);
-
-    /*
-    * rte_mempool_create_empty() has sanity check to refuse large cache
-    * size compared to the number of elements.
-    * CACHE_FLUSHTHRESH_MULTIPLIER (1.5) is defined in a C file, so using a
-    * constant number 2 instead.
-    */
-    // nb_buff = RTE_MAX(nb_buff, MP_CACHE_SZ * 2);
 
     mbuf_pool = rte_pktmbuf_pool_create(pinfo[portid].mem_pool, nb_buff, MP_CACHE_SZ, 0, buff_size + RTE_PKTMBUF_HEADROOM, rte_socket_id());
 
@@ -175,6 +192,7 @@ int port_init(int portid, int num_queues, int st_queues, uint16_t nb_descs, int 
 
 extern int port, num_queues, stqueues, pktsize, numpkts, cycles, interval;
 
+
 struct option long_options[] = {
     {"port",        required_argument,  0,  'p'},
     {"num_queues",  required_argument,  0,  'q'},
@@ -195,7 +213,6 @@ static int parse_args(int argc, char **argv) {
 
     while (1) {
         int c = getopt_long(argc, argv, short_options, long_options, NULL);
-
         if (c == -1) {
             break;
         }

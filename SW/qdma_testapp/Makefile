@@ -1,5 +1,5 @@
 RTE_TARGET := $(if $(strip $(RTE_TARGET)), $(strip $(RTE_TARGET)), build)
-RTE_SDK ?= /home/yuli9/qdma_ip_driver/QDMA/DPDK/
+RTE_SDK ?= ~/qdma_ip_driver/QDMA/DPDK/
 
 #Default BRAM size is set to 128K
 #if modified the BRAM_SIZE, the same need to be set to the driver Makefile
@@ -7,10 +7,10 @@ BRAM_SIZE ?= 131072
 
 # binary name
 APP = test
-APP1 = test_RR
-# all source are stored in SRCS-y
-SRCS-y := test.c pcierw.c
-SRCS-x := test_RR.c pcierw.c
+APP_RR = test_RR
+
+SRCS-y := test.c pcierw.c test.h
+SRCS-x := test_RR.c pcierw.c test.h
 
 ifeq ($(CONFIG_RTE_LIBRTE_QDMA_GCOV),y)
   CFLAGS += -g -ftest-coverage -fprofile-arcs
@@ -27,8 +27,8 @@ RR: shared1
 .PHONY: shared static shared1
 shared: $(RTE_TARGET)/$(APP)-shared
 	ln -sf $(APP)-shared $(RTE_TARGET)/$(APP)
-shared1: $(RTE_TARGET)/$(APP1)-shared
-	ln -sf $(APP1)-shared $(RTE_TARGET)/$(APP1)
+shared1: $(RTE_TARGET)/$(APP_RR)-shared
+	ln -sf $(APP_RR)-shared $(RTE_TARGET)/$(APP_RR)
 static: $(RTE_TARGET)/$(APP)-static
 	ln -sf $(APP)-static $(RTE_TARGET)/$(APP)
 
@@ -52,7 +52,7 @@ LDFLAGS += $(DPDK_LIBS)
 
 $(RTE_TARGET)/$(APP)-shared: $(SRCS-y) Makefile | $(RTE_TARGET)
 	$(CC) $(CFLAGS) $(SRCS-y) -o $@ $(DPDK_LIBS)
-$(RTE_TARGET)/$(APP1)-shared: $(SRCS-x) Makefile | $(RTE_TARGET)
+$(RTE_TARGET)/$(APP_RR)-shared: $(SRCS-x) Makefile | $(RTE_TARGET)
 	$(CC) $(CFLAGS) $(SRCS-x) -o $@ $(DPDK_LIBS)
 $(RTE_TARGET)/$(APP)-static: $(SRCS-y) Makefile | $(RTE_TARGET)
 	$(CC) $(CFLAGS) $(SRCS-y) -o $@ $(DPDK_LIBS_STATIC)

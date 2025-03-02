@@ -1,25 +1,4 @@
-#include <rte_eal.h> /**> rte_eal_init */
-#include <rte_debug.h> /**> for rte_panic */
-#include <rte_ethdev.h> /**> rte_eth_rx_burst */
-#include <rte_errno.h> /**> rte_errno global var */
-#include <rte_memzone.h> /**> rte_memzone_dump */
-#include <rte_memcpy.h>
-#include <rte_malloc.h>
-#include <rte_cycles.h>
-#include <rte_log.h>
-#include <rte_string_fns.h>
-#include <rte_spinlock.h>
-#include <rte_mbuf.h>
-#include <string.h>
-#include <stdio.h>
-#include <unistd.h>
-#include <getopt.h>
-#include <fcntl.h>
-#include <time.h>
-#include "/home/yuli9/qdma_ip_driver/QDMA/DPDK/drivers/net/qdma/rte_pmd_qdma.h"
 #include "test.h"
-#include "pcierw.h"
-#include "qdma_regs.h"
 
 // #define RTE_LIBRTE_QDMA_PMD 1
 #define MAX_RX_QUEUE_PER_LCORE 16
@@ -68,10 +47,8 @@ static int recv_pkt_single_core(input_arg_t* inputs) { // for each lcore
         while(core_to_q[idx][idx2] != -1) {
             // rte_delay_us(1);
             nb_rx = rte_eth_rx_burst(portid, core_to_q[idx][idx2], pkts, BURST_SIZE);
-            // nb_tx = rte_eth_tx_burst(portid, core_to_q[idx][idx2], pkts, nb_rx);
             packet_recv_per_core[idx] += nb_rx;
             for (int i = 0; i < nb_rx; i++) {
-            // for (int i = nb_tx; i < nb_rx; i++) {
                 rte_pktmbuf_free(pkts[i]);
             }
             idx2++;
@@ -127,7 +104,7 @@ int main(int argc, char* argv[]) {
         rte_exit(EXIT_FAILURE, "No Ethernet devices found. Try updating the FPGA image.\n");
 
     // for (int portid = 0; portid < num_ports; portid++)
-    rte_spinlock_init(&pinfo[portid].port_update_lock);
+    // rte_spinlock_init(&pinfo[port].port_update_lock);
 
     /* Allocate aligned mezone */
     rte_pmd_qdma_compat_memzone_reserve_aligned();
@@ -143,12 +120,14 @@ int main(int argc, char* argv[]) {
         return -1;
     }
 
+    qbase = pinfo[port].queue_base;
+
     num_lcores = rte_lcore_count();
     recv_pkts = (int*)malloc(num_lcores * sizeof(int));
     memset(recv_pkts, 0, num_lcores * sizeof(int));
     int** lcore_q_map = (int**)malloc(num_lcores * sizeof(int*));  //index 0: core id, rest: queueid
     int q_per_core = num_queues / num_lcores;
-    int q_count = pinfo[port].queue_base;
+    int q_count = qbase;
     if (num_queues % num_lcores != 0) {
         q_per_core++;
     } 
@@ -160,7 +139,7 @@ int main(int argc, char* argv[]) {
     }
     for (int x = 0 ; x < q_per_core ; x++) {
         for (idx = 0 ; idx < num_lcores ; idx++) {
-            if (q_count < (num_queues+pinfo[port].queue_base)) {
+            if (q_count < (num_queues+qbase)) {
                 lcore_q_map[idx][x] = q_count;
                 q_count++;
             } else {
@@ -168,8 +147,6 @@ int main(int argc, char* argv[]) {
             }
         }
     }
-
-    qbase = pinfo[port].queue_base;
     
     int size;
     double tot_time = 0;
@@ -177,17 +154,17 @@ int main(int argc, char* argv[]) {
     double pkts_per_second, throughput_gbps;
     user_bar_idx = pinfo[port].user_bar_idx;
 
-    // reg_val = PciRead(user_bar_idx, C2H_CONTROL_REG, portid);
-    // reg_val &= C2H_CONTROL_REG_MASK;
-    // loopback_en = reg_val & ST_LOOPBACK_EN;
-
     int qid = 0;
     for (i = 0 ; i < 128 ; i++) {
         PciWrite(user_bar_idx, RSS_START + (i*4), qid+qbase, port);
         qid = (qid + 1) % num_queues;
     }
 
-    // reg_val &= C2H_CONTROL_REG_MASK;
+    double arr[10];
+    int index = 0;
+    uint64_t number_pkts = 0, number_pkts_prev = 0;
+    uint64_t hz = rte_get_timer_hz();
+    uint64_t interval_cycles = interval * hz;
 
     max_completion_size = pktsize + 54; //datasize + headersize
     printf("max_completion_size: %d\n", max_completion_size);
@@ -196,43 +173,29 @@ int main(int argc, char* argv[]) {
     PciWrite(user_bar_idx, CYCLES_PER_PKT, cycles, port);
     PciWrite(user_bar_idx, C2H_NUM_QUEUES, num_queues, port);
 
-    /* Start the C2H Engine */
-    PciWrite(user_bar_idx, C2H_ST_QID_REG, qbase, port);
-    reg_val = PciRead(user_bar_idx, C2H_CONTROL_REG, port);
-    reg_val |= ST_C2H_START_VAL;
-    // reg_val |= ST_C2H_PERF_ENABLE;
-    PciWrite(user_bar_idx, C2H_CONTROL_REG, reg_val, port);
-
-    // reg_val = PciRead(user_bar_idx, C2H_PACKET_COUNT_REG, portid);
-    // printf("BAR-%d is the QDMA C2H number of packets:0x%x,\n", user_bar_idx, reg_val);
-    // reg_val = PciRead(user_bar_idx, CYCLES_PER_PKT, portid);
-    // printf("Cycles per packet is : %d\n", reg_val);
     qid = 0;
-    // clock_t begin,end;
     double time_elapsed = 0.0, time_elapsed2 = 0.0;
     double rate = 0.0;
-    // bool a = true;
-    // begin = clock();
+
+    printf("num_lcore is %d, num_queue is %d\n", num_lcores-1, num_queues);
 
     input_arg_t* temp = (input_arg_t*)malloc(sizeof(input_arg_t));
     temp->core_to_q = lcore_q_map;
     temp->numpkts = numpkts;
     temp->portid = port;
 
-    rte_eal_mp_remote_launch((lcore_function_t*)&recv_pkt_single_core, temp, SKIP_MAIN);
-    
-    double arr[10];
-    int index = 0;
-    uint64_t number_pkts = 0, number_pkts_prev = 0;
-    uint64_t hz = rte_get_timer_hz();
-    uint64_t interval_cycles = interval * hz;
+    /* Start the C2H Engine */
+    PciWrite(user_bar_idx, C2H_ST_QID_REG, qbase, port);
+    reg_val = PciRead(user_bar_idx, C2H_CONTROL_REG, port);
+    reg_val |= ST_C2H_START_VAL;
+    PciWrite(user_bar_idx, C2H_CONTROL_REG, reg_val, port);
 
     prev_tsc = rte_rdtsc_precise();
     test_tsc = prev_tsc;
 
-    printf("num_lcore is %d, num_queue is %d\n", num_lcores-1, num_queues);
+    rte_eal_mp_remote_launch((lcore_function_t*)&recv_pkt_single_core, temp, SKIP_MAIN);
 
-    // Monitor and print
+    /*Monitor and print*/
     while(1){
         cur_tsc = rte_rdtsc_precise();
         diff_tsc = cur_tsc - prev_tsc;
@@ -258,53 +221,37 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // cur_tsc = rte_rdtsc_precise();
     /* Stop the C2H Engine */
     reg_val = PciRead(user_bar_idx, C2H_CONTROL_REG, port); 
-    // reg_val &= C2H_CONTROL_REG_MASK;
-    // printf("%d\n", reg_val);
     reg_val |= ST_C2H_END_VAL;
-    // printf("%d\n", reg_val);
     PciWrite(user_bar_idx, C2H_CONTROL_REG, reg_val,port);
 
-    // diff_tsc = cur_tsc - test_tsc;
-    // printf("diff_tsc: %ld\n", diff_tsc);
-
-    // for (int i = 0; i < num_lcores-1; i++) {
-    //     recvpkts += packet_recv_per_core[i];
-    // }
     printf("DMA received number of packets: %ld\n",number_pkts_prev);
     rte_spinlock_unlock(&pinfo[port].port_update_lock);
 
     /* Calculate average throughput (Gbps) in bits per second */
     // throughput_gbps = pinfo[portid].buff_size * 8.0 * number_pkts_prev / (double)diff_tsc * (double)hz / 1000000000.0;
-
     // printf("Throughput Gbps %lf ", throughput_gbps);
     // printf("Number of bytes: %ld ", pinfo[portid].buff_size * recvpkts);
     // printf("total latency: %lf\n", (double)diff_tsc/ (double)hz);
+
+    /*Write the recorded throughput to the target file*/
     char filename[100];
     sprintf(filename, "./result/result_%d_rx_only.txt", num_queues);
     FILE* file = fopen(filename, "a");
     double average;
-    for (i = 0 ; i < index ; i++) {
+    for (i = 0 ; i < 10 ; i++) {
         average += arr[i];
     }
-    average = average/(1.0*index);
+    average = average/(1.0*10);
     fprintf(file, "%lf\n", average);
     fclose(file);
-    // sprintf(filename, "./result/round_trip_%d.txt", max_completion_size);
-    // FILE* file1 = fopen(filename, "w");
-    // for (i = 0 ; i < 512 ; i++) {
-    //     reg_val = PciRead(user_bar_idx, DATA_START+i*4, portid);
-    //     fprintf(file1, "%u\n", reg_val);
-    // }
-    // fclose(file1);
 
+    /*Terminate the device*/
     rte_eth_dev_stop(port);
 
     rte_pmd_qdma_dev_close(port);
     mp = rte_mempool_lookup(pinfo[port].mem_pool);
-
     if (mp != NULL)
         rte_mempool_free(mp);
     rte_eal_cleanup();
