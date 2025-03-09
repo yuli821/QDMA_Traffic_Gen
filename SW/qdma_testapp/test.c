@@ -26,13 +26,14 @@
 #define MAX_TX_QUEUE_PER_PORT 16
 
 /* Input option initialization */
-int port = 0;
-int num_queues = 1;
-int stqueues = 1;
-int pktsize = 1024;
-int numpkts = 0;
-int cycles = 0;
-int interval = 10;
+uint64_t port = 0;
+uint64_t num_queues = 1;
+uint64_t stqueues = 1;
+uint64_t pktsize = 1024;
+uint64_t numpkts = 0;
+uint64_t cycles = 0;
+uint64_t interval = 10;
+uint64_t ddio_mask = 0xc0000;
 
 
 int test_finished = 0;
@@ -230,7 +231,7 @@ int main(int argc, char* argv[]) {
     prev_tsc = rte_rdtsc_precise();
     test_tsc = prev_tsc;
 
-    printf("num_lcore is %d, num_queue is %d\n", num_lcores-1, num_queues);
+    printf("num_lcore is %d, num_queue is %ld\n", num_lcores-1, num_queues);
 
     // Monitor and print
     while(1){
@@ -283,7 +284,7 @@ int main(int argc, char* argv[]) {
     // printf("Number of bytes: %ld ", pinfo[portid].buff_size * recvpkts);
     // printf("total latency: %lf\n", (double)diff_tsc/ (double)hz);
     char filename[100];
-    sprintf(filename, "./result/result_%d_rx_only.txt", num_queues);
+    sprintf(filename, "./result/result_%ld_rx_only.txt", num_queues);
     FILE* file = fopen(filename, "a");
     double average;
     for (i = 0 ; i < index ; i++) {

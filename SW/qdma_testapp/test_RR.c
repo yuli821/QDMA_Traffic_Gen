@@ -29,13 +29,14 @@
 #define MAX_TX_QUEUE_PER_PORT 16
 
 /* Input option initialization */
-int port = 0;
-int num_queues = 1;
-int stqueues = 1;
-int pktsize = 1024;
-int numpkts = 0;
-int cycles = 0;
-int interval = 10;
+uint64_t port = 0;
+uint64_t num_queues = 1;
+uint64_t stqueues = 1;
+uint64_t pktsize = 1024;
+uint64_t numpkts = 0;
+uint64_t cycles = 0;
+uint64_t interval = 10;
+uint64_t ddio_mask = 0xc0000;
 
 int test_finished = 0;
 int num_ports;
@@ -56,31 +57,36 @@ static int recv_pkt_single_core(input_arg_t* inputs) { // for each lcore
     int** core_to_q = inputs->core_to_q;
     int numpkts = inputs->numpkts;
     int portid = inputs->portid;
-    struct rte_mbuf *pkts[NUM_RX_PKTS] = { NULL };
+    struct rte_mbuf *pkts[BURST_SIZE] = { NULL };
     int nb_rx, nb_tx;
+    uint32_t temp_data[1024];
 
     printf("start test on core %d\n", idx);
     size_t offset = sizeof(struct rte_ether_hdr) + sizeof(struct rte_ipv4_hdr) + sizeof(struct rte_udp_hdr);
     uint32_t input_data = 0;
+    // printf("offset is %d\n", offset);
 
     while(!test_finished) {
-        idx2 = 0;
-        while(core_to_q[idx][idx2] != -1) {
+        // idx2 = 0;
+        // while(core_to_q[idx][idx2] != -1) {
             // rte_delay_us(1);
-            nb_rx = rte_eth_rx_burst(portid, core_to_q[idx][idx2], pkts, BURST_SIZE);
+            nb_rx = rte_eth_rx_burst(portid, core_to_q[idx][0], pkts, BURST_SIZE);
             // for (int i = 0; i < nb_rx; i++) {
-            //     uint32_t *data = rte_pktmbuf_mtod_offset(pkts[i], uint32_t *, offset);
-            //     input_data += data[0];
+            //     uint32_t *data = rte_pktmbuf_mtod_offset(pkts[i], uint32_t *, 0);
+            //     memcpy(&temp_data, data, pktsize);
             // }
-            nb_tx = rte_eth_tx_burst(portid, core_to_q[idx][idx2], pkts, nb_rx);
+            if (nb_rx > 0) {
+                // nb_tx = 0;
+                nb_tx = rte_eth_tx_burst(portid, core_to_q[idx][0], pkts, nb_rx);
+                // printf("nb_rx is %d\n", nb_rx);
 
-            packet_recv_per_core[idx] += nb_rx;
-
-            for (int i = nb_tx; i < nb_rx; i++) {
-                rte_pktmbuf_free(pkts[i]);
+                for (int i = nb_tx; i < nb_rx; i++) {
+                    rte_pktmbuf_free(pkts[i]);
+                }
+                packet_recv_per_core[idx] += nb_tx;
             }
-            idx2++;
-        }
+            // idx2++;
+        // }
     }
     return 0;
 }
@@ -102,7 +108,7 @@ int main(int argc, char* argv[]) {
     unsigned int q_data_size = 0;
     uint64_t dst_addr = 0, src_addr = 0;
     //streaming
-    unsigned int max_completion_size = 0, last_pkt_size = 0, only_pkt = 0;
+    unsigned int max_completion_size = 0;
     unsigned int max_rx_retry, rcv_count = 0, num_pkts_recv = 0, total_rcv_pkts = 0;
     int user_bar_idx;
     unsigned int reg_val, loopback_en;
@@ -130,8 +136,8 @@ int main(int argc, char* argv[]) {
     if (num_ports < 1)
         rte_exit(EXIT_FAILURE, "No Ethernet devices found. Try updating the FPGA image.\n");
 
-    for (int portid = 0; portid < num_ports; portid++)
-        rte_spinlock_init(&pinfo[portid].port_update_lock);
+    // for (int portid = 0; portid < num_ports; portid++)
+    //     rte_spinlock_init(&pinfo[portid].port_update_lock);
 
     /* Allocate aligned mezone */
     rte_pmd_qdma_compat_memzone_reserve_aligned();
@@ -198,24 +204,6 @@ int main(int argc, char* argv[]) {
     PciWrite(user_bar_idx, CYCLES_PER_PKT, cycles, port);
     PciWrite(user_bar_idx, C2H_NUM_QUEUES, num_queues, port);
 
-    /* Start the C2H Engine */
-    PciWrite(user_bar_idx, C2H_ST_QID_REG, qbase, port);
-    reg_val = PciRead(user_bar_idx, C2H_CONTROL_REG, port);
-    reg_val |= ST_C2H_START_VAL;
-    // reg_val |= ST_C2H_PERF_ENABLE;
-    PciWrite(user_bar_idx, C2H_CONTROL_REG, reg_val, port);
-
-    // reg_val = PciRead(user_bar_idx, C2H_PACKET_COUNT_REG, port);
-    // printf("BAR-%d is the QDMA C2H number of packets:0x%x,\n", user_bar_idx, reg_val);
-    // reg_val = PciRead(user_bar_idx, CYCLES_PER_PKT, port);
-    // printf("Cycles per packet is : %d\n", reg_val);
-    qid = 0;
-    // clock_t begin,end;
-    double time_elapsed = 0.0, time_elapsed2 = 0.0;
-    double rate = 0.0;
-    // bool a = true;
-    // begin = clock();
-
     input_arg_t* worker_args = (input_arg_t*)malloc(sizeof(input_arg_t));
     worker_args->core_to_q = lcore_q_map;
     worker_args->numpkts = numpkts;
@@ -228,15 +216,23 @@ int main(int argc, char* argv[]) {
     uint64_t number_pkts = 0, number_pkts_prev = 0;
     uint64_t hz = rte_get_timer_hz();
     uint64_t interval_cycles = interval * hz;
+    double rate = 0.0;
+    printf("num_lcore is %d, num_queue is %ld\n", num_lcores, num_queues);
 
-    prev_tsc = rte_rdtsc_precise();
+    /* Start the C2H Engine */
+    sleep(1);
+    PciWrite(user_bar_idx, C2H_ST_QID_REG, qbase, port);
+    reg_val = PciRead(user_bar_idx, C2H_CONTROL_REG, port);
+    reg_val |= ST_C2H_START_VAL;
+    // reg_val |= ST_C2H_PERF_ENABLE;
+    PciWrite(user_bar_idx, C2H_CONTROL_REG, reg_val, port);
+
+    prev_tsc = rte_rdtsc();
     test_tsc = prev_tsc;
-
-    printf("num_lcore is %d, num_queue is %d\n", num_lcores, num_queues);
 
     // Monitor and print
     while(1){
-        cur_tsc = rte_rdtsc_precise();
+        cur_tsc = rte_rdtsc();
         diff_tsc = cur_tsc - prev_tsc;
 
         // print tput every 1s
@@ -276,7 +272,7 @@ int main(int argc, char* argv[]) {
     //     recvpkts += packet_recv_per_core[i];
     // }
     printf("DMA received number of packets: %ld\n",number_pkts_prev);
-    rte_spinlock_unlock(&pinfo[port].port_update_lock);
+    // rte_spinlock_unlock(&pinfo[port].port_update_lock);
 
     /* Calculate average throughput (Gbps) in bits per second */
     // throughput_gbps = pinfo[port].buff_size * 8.0 * number_pkts_prev / (double)diff_tsc * (double)hz / 1000000000.0;
@@ -285,17 +281,17 @@ int main(int argc, char* argv[]) {
     // printf("Number of bytes: %ld ", pinfo[port].buff_size * recvpkts);
     // printf("total latency: %lf\n", (double)diff_tsc/ (double)hz);
     char filename[100];
-    sprintf(filename, "./result/result_%d.txt", num_queues);
-    FILE* file = fopen(filename, "a");
-    double average;
-    for (i = 0 ; i < index ; i++) {
-        average += arr[i];
-    }
-    average = average/(1.0*index);
-    fprintf(file, "%lf\n", average);
-    fclose(file);
+    // sprintf(filename, "./result/result_%ld.txt", num_queues);
+    // FILE* file = fopen(filename, "a");
+    // double average;
+    // for (i = 0 ; i < index ; i++) {
+    //     average += arr[i];
+    // }
+    // average = average/(1.0*index);
+    // fprintf(file, "%lf\n", average);
+    // fclose(file);
 
-    sprintf(filename, "./result/round_trip_%d.txt", max_completion_size);
+    sprintf(filename, "./result_change_ways/round_trip_%d_%lx_%ld.txt", max_completion_size, ddio_mask, cycles);
     FILE* file1 = fopen(filename, "w");
     for (i = 0 ; i < 512 ; i++) {
         reg_val = PciRead(user_bar_idx, DATA_START+i*4, port);

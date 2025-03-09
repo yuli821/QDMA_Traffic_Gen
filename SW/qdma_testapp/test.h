@@ -2,7 +2,7 @@
 
 #define PORT_0 0
 
-#define NUM_DESC_PER_RING 2048
+#define NUM_DESC_PER_RING 1024
 
 #define NUM_RX_PKTS (NUM_DESC_PER_RING-1)
 //#define NUM_RX_PKTS 32
@@ -39,7 +39,7 @@
 #define DATA_START      0xE8
 
 #define BURST_SIZE 128
-#define MBUF_SIZE 2048
+#define MBUF_SIZE 1024
 #define CHANGE_INDRECT_TABLE 0
 
 extern int num_ports;
@@ -91,7 +91,7 @@ int port_init(int portid, int num_queues, int st_queues, uint16_t nb_descs, int 
     * can be pending with application after Rx processing but before
     * consumed by application or sent to Tx
     */
-    nb_buff += ((NUM_TX_PKTS) * num_queues);
+    nb_buff += ((nb_descs) * BURST_SIZE);
 
     /*
     * rte_mempool_create_empty() has sanity check to refuse large cache
@@ -162,9 +162,10 @@ int port_init(int portid, int num_queues, int st_queues, uint16_t nb_descs, int 
         diag = rte_eth_rx_queue_setup(portid, x, nb_descs, socket_id, &rx_conf, mbuf_pool);
         if (diag < 0)
             rte_exit(EXIT_FAILURE, "Cannot setup port %d RX Queue 0 (err=%d)\n", portid, diag);
+        
+        // rte_pmd_qdma_set_c2h_descriptor_prefetch(portid, x, 1);
+        // rte_pmd_qdma_set_cmpt_trigger_mode(portid, x, RTE_PMD_QDMA_TRIG_MODE_EVERY);
     }
-    rte_pmd_qdma_set_c2h_descriptor_prefetch(portid, 0, 1);
-    // rte_pmd_qdma_set_cmpt_trigger_mode(portid, 0, RTE_PMD_QDMA_TRIG_MODE_EVERY);
 
     diag = rte_eth_dev_start(portid);
     if (diag < 0)
@@ -173,7 +174,8 @@ int port_init(int portid, int num_queues, int st_queues, uint16_t nb_descs, int 
     return 0;
 }
 
-extern int port, num_queues, stqueues, pktsize, numpkts, cycles, interval;
+extern uint64_t port, num_queues, stqueues, pktsize, numpkts, cycles, interval;
+extern uint64_t ddio_mask;
 
 struct option long_options[] = {
     {"port",        required_argument,  0,  'p'},
@@ -183,12 +185,13 @@ struct option long_options[] = {
     {"numpkts",     required_argument,  0,  'n'},
     {"cycles",  	required_argument,  0,  'c'},
     {"interval",  	required_argument,  0,  'i'},
+    {"ddio_mask",  	required_argument,  0,  'd'},
     {"help",        no_argument,        0,  'h'},
     {0,             0,                  0,  0  }
 };
 
 static int parse_args(int argc, char **argv) {
-    char short_options[] = "p:q:Q:s:n:c:i:h";
+    char short_options[] = "p:q:Q:s:n:c:i:d:h";
     char *prgname = argv[0];
     int nb_required_args = 0;
     int retval;
@@ -203,31 +206,35 @@ static int parse_args(int argc, char **argv) {
 
         switch (c) {
         case 'p':
-    		port = (uint16_t)strtol(optarg, endptr, 10);
+    		port = (uint64_t)strtol(optarg, endptr, 10);
             break;
 
         case 'q':
-			num_queues = (uint16_t)strtol(optarg, endptr, 10);
+			num_queues = (uint64_t)strtol(optarg, endptr, 10);
             break;
 
         case 'Q':
-			stqueues = (uint16_t)strtol(optarg, endptr, 10);
+			stqueues = (uint64_t)strtol(optarg, endptr, 10);
             break;
 
         case 's':
-			pktsize = (uint16_t)strtol(optarg, endptr, 10);
+			pktsize = (uint64_t)strtol(optarg, endptr, 10);
             break;
 
         case 'n':
-			numpkts = (uint16_t)strtol(optarg, endptr, 10);
+			numpkts = (uint64_t)strtol(optarg, endptr, 10);
             break;
 
         case 'c':
-			cycles = (uint16_t)strtol(optarg, endptr, 10);
+			cycles = (uint64_t)strtol(optarg, endptr, 10);
             break;
 
         case 'i':
-			interval = (uint16_t)strtol(optarg, endptr, 10);
+			interval = (uint64_t)strtol(optarg, endptr, 10);
+            break;
+
+        case 'd':
+            ddio_mask = (uint64_t)strtol(optarg, endptr, 16);
             break;
 
         case 'h':
