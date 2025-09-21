@@ -1034,21 +1034,25 @@ ssize_t dmaperf_asynciosubmit(int fd, char *buffer, ssize_t size,
 
 	if (num_events != 1) {
 		printf("Error: io_getevents timed out\n");
+		io_destroy(aioctx);
 		return -EIO;
 	}
 
 	iocbp = (struct iocb *)event.obj;
 	if (!iocbp) {
 		printf("Error: Invalid IOCB from events\n");
+		io_destroy(aioctx);
 		return -EIO;
 	}
 
 	iov = (struct iovec *)(iocbp->u.c.buf);
 	if (!iov) {
 		printf("invalid buffer\n");
+		io_destroy(aioctx);
 		return -EIO;
 	}
 
+	io_destroy(aioctx);
 	return size;
 }
 

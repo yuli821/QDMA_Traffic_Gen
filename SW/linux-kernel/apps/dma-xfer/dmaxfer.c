@@ -30,8 +30,8 @@
 #include <sys/time.h>
 #include <sys/ioctl.h>
 #include <sys/sysinfo.h>
-#include <linux/ktime.h>
-#include <linux/time64.h>
+// #include <linux/ktime.h>
+//#include <linux/time64.h>
 //added
 #include <stdatomic.h>
 #include <sched.h>
@@ -367,8 +367,8 @@ static int parse_config_file(const char *cfg_fname)
 	char rng_sz[100] = {'\0'};
 	char rng_sz_path[200] = {'\0'};
 	int rng_sz_fd, ret = 0;
-	int input_file_provided = 0;
-	int output_file_provided = 0;
+	//int input_file_provided = 0;
+	//int output_file_provided = 0;
 	struct stat st;
 
 	fp = fopen(cfg_fname, "r");
@@ -494,13 +494,16 @@ static int parse_config_file(const char *cfg_fname)
 				printf("Error: bad parameter \"%s\", integer expected", value);
 				goto prase_cleanup;
 			}
-		} else if (!strncmp(config, "inputfile", 7)) {
-			copy_value(value, input_file, 128);
-			input_file_provided = 1;
-		} else if (!strncmp(config, "outputfile", 7)) {
-			copy_value(value, output_file, 128);
-			output_file_provided = 1;
-		} else if (!strncmp(config, "io_type", 6)) {
+		} 
+		// else if (!strncmp(config, "inputfile", 7)) {
+		// 	copy_value(value, input_file, 128);
+		// 	input_file_provided = 1;
+		// } 
+		// else if (!strncmp(config, "outputfile", 7)) {
+		// 	copy_value(value, output_file, 128);
+		// 	output_file_provided = 1;
+		// } 
+		else if (!strncmp(config, "io_type", 6)) {
 			if (!strncmp(value, "io_sync", 6))
 				io_type = 0;
 			else if (!strncmp(value, "io_async", 6))
@@ -554,31 +557,31 @@ static int parse_config_file(const char *cfg_fname)
 		return -EINVAL;
 	}
 
-	if ((dir == QDMA_Q_DIR_H2C) || (dir == QDMA_Q_DIR_BIDI)) {
-		if (!input_file_provided) {
-			printf("Error: Input File required for Host to Card transfers\n");
-			return -EINVAL;
-		}
+	// if ((dir == QDMA_Q_DIR_H2C) || (dir == QDMA_Q_DIR_BIDI)) {
+		// if (!input_file_provided) {
+		// 	printf("Error: Input File required for Host to Card transfers\n");
+		// 	return -EINVAL;
+		// }
 
-		ret = stat(input_file, &st);
-		if (ret < 0) {
-			printf("Error: Failed to read input file [%s] length\n",
-					input_file);
-			return ret;
-		}
+		// ret = stat(input_file, &st);
+		// if (ret < 0) {
+		// 	printf("Error: Failed to read input file [%s] length\n",
+		// 			input_file);
+		// 	return ret;
+		// }
 
-		if (pkt_sz > st.st_size) {
-			printf("Error: File [%s] length is lesser than pkt_sz %u\n",
-					input_file, pkt_sz);
-			return -EINVAL;
-		}
-	}
+		// if (pkt_sz > st.st_size) {
+		// 	printf("Error: File [%s] length is lesser than pkt_sz %u\n",
+		// 			input_file, pkt_sz);
+		// 	return -EINVAL;
+		// }
+	// }
 
-	if (((dir == QDMA_Q_DIR_C2H) || (dir == QDMA_Q_DIR_BIDI)) &&
-			!output_file_provided) {
-		printf("Error: Data output file was not provided\n");
-		return -EINVAL;
-	}
+	// if (((dir == QDMA_Q_DIR_C2H) || (dir == QDMA_Q_DIR_BIDI)) &&
+	// 		!output_file_provided) {
+	// 	printf("Error: Data output file was not provided\n");
+	// 	return -EINVAL;
+	// }
 
 	if (!strcmp(trigmode_str, "every"))
 		trig_mode = 1;
@@ -606,12 +609,21 @@ prase_cleanup:
 
 static inline void qdma_q_prep_name(struct queue_info *q_info, int qid, int pf)
 {
-	q_info->q_name = calloc(QDMA_Q_NAME_LEN, 1);
-	snprintf(q_info->q_name, QDMA_Q_NAME_LEN, "/dev/qdma%s%05x-%s-%d",
+	char *temp_name = calloc(QDMA_Q_NAME_LEN, 1);
+	snprintf(temp_name, QDMA_Q_NAME_LEN, "/dev/qdma%s%05x-%s-%d",
 			(is_vf) ? "vf" : "",
 			(pci_bus << 12) | (pci_dev << 4) | pf,
 			(mode == QDMA_Q_MODE_MM) ? "MM" : "ST",
 			qid);
+	strncpy(q_info->q_name, temp_name, sizeof(q_info->q_name) - 1);
+	q_info->q_name[sizeof(q_info->q_name) - 1] = '\0';
+	free(temp_name);
+	// q_info->q_name = temp_name;
+	// snprintf(q_info->q_name, QDMA_Q_NAME_LEN, "/dev/qdma%s%05x-%s-%d",
+	// 		(is_vf) ? "vf" : "",
+	// 		(pci_bus << 12) | (pci_dev << 4) | pf,
+	// 		(mode == QDMA_Q_MODE_MM) ? "MM" : "ST",
+	// 		qid);
 }
 
 static int qdma_validate_qrange(void)
@@ -960,7 +972,7 @@ static void qdma_queues_cleanup(struct queue_info *q_info, int q_count)
 		qdma_destroy_queue(q_info[q_index].dir,
 				q_info[q_index].qid,
 				q_info[q_index].pf);
-		free(q_info[q_index].q_name);
+		// free(q_info[q_index].q_name);
 	}
 	free(q_info);
 	q_info = NULL;
@@ -1110,93 +1122,6 @@ static int qdma_stop_generator(struct queue_info *q_info, unsigned char user_bar
 	return ret;
 }
 
-static int qdma_create_receiver_thread(struct queue_info *q_info, int q_count)
-{
-	int ret;
-	int i;
-
-	printf("Creating receiver threads for %d queues\n", q_count);
-	for (i = 0; i < q_count; i++) {
-		if (q_info[i].dir == DMAXFER_IO_READ) {
-			ret = pthread_create(&q_info[i].thread, NULL, qdma_packet_receiver, &q_info[i]);
-			if (ret != 0) {
-				printf("Error: Failed to create receiver thread for queue %d: %s\n", q_info[i].qid, strerror(ret));
-				for (int j = 0; j < i; j++) {
-					if (q_info[j].thread != (pthread_t)NULL) {
-						pthread_cancel(q_info[j].thread);
-						pthread_join(q_info[j].thread, NULL);
-					}
-				}
-				return ret;
-			}
-			printf("Receiver thread for queue %d created on core %d\n", q_info[i].qid, q_info[i].core_id);
-		}
-	}
-	return 0;
-}
-
-static int qdmautils_read(struct queue_info *q_info,
-		char *output_file, int io_type)
-{
-	int outfile_fd = -1;
-	char *buffer = NULL;
-	char *allocated = NULL;
-	unsigned int size;
-	unsigned int offset;
-	int ret;
-
-	if (!q_info || !input_file) {
-		printf("Error: Invalid input params\n");
-		return -EINVAL;
-	}
-
-	size = pkt_sz;
-
-	outfile_fd = open(output_file, O_WRONLY | O_CREAT | O_TRUNC | O_SYNC);
-	if (outfile_fd < 0) {
-		printf("Error: unable to open/create output file %s, ret :%d\n",
-				output_file, outfile_fd);
-		perror("open/create output file");
-		return outfile_fd;
-	}
-
-	offset = 0;
-	posix_memalign((void **)&allocated, 4096 /*alignment */ , size + 4096);
-	if (!allocated) {
-		printf("Error: OOM %u.\n", size + 4096);
-		ret = -ENOMEM;
-		goto out;
-	}
-	buffer = allocated + offset;
-
-	if (io_type == 0) {
-		ret = qdmautils_sync_xfer(q_info->q_name,
-				q_info->dir, buffer, size);
-		if (ret < 0)
-			printf("Error: QDMA SYNC transfer Failed, ret :%d\n", ret);
-		else
-			printf("PF :%d Queue :%d C2H Sync transfer success\n", q_info->pf, q_info->qid);
-	} else {
-		ret = qdmautils_async_xfer(q_info->q_name,
-				q_info->dir, buffer, size);
-		if (ret < 0)
-			printf("Error: QDMA ASYNC transfer Failed, ret :%d\n", ret);
-		else
-			printf("PF :%d Queue :%d C2H ASync transfer success\n", q_info->pf, q_info->qid);
-	}
-	if (ret < 0)
-		goto out;
-
-	ret = write_from_buffer(output_file, outfile_fd, buffer, size, offset);
-	if (ret < 0)
-		printf("Error: Write from buffer to %s failed\n", output_file);
-out:
-	free(allocated);
-	close(outfile_fd);
-
-	return ret;
-}
-
 static void *qdma_packet_receiver(void *arg)
 {
 	struct queue_info *q_info = (struct queue_info*)arg;
@@ -1247,67 +1172,155 @@ static void *qdma_packet_receiver(void *arg)
 	return NULL;
 }
 
-static int qdmautils_write(struct queue_info *q_info,
-		char *input_file, int io_type)
+static int qdma_create_receiver_thread(struct queue_info *q_info, int q_count)
 {
-	int infile_fd = -1;
-	int outfile_fd = -1;
-	char *buffer = NULL;
-	char *allocated = NULL;
-	unsigned int size;
-	unsigned int offset;
 	int ret;
-	enum qdmautils_io_dir dir;
+	int i;
 
-	if (!q_info || !input_file) {
-		printf("Error: Invalid input params\n");
-		return -EINVAL;
+	printf("Creating receiver threads for %d queues\n", q_count);
+	for (i = 0; i < q_count; i++) {
+		if (q_info[i].dir == DMAXFER_IO_READ) {
+			ret = pthread_create(&q_info[i].thread, NULL, qdma_packet_receiver, &q_info[i]);
+			if (ret != 0) {
+				printf("Error: Failed to create receiver thread for queue %d: %s\n", q_info[i].qid, strerror(ret));
+				for (int j = 0; j < i; j++) {
+					if (q_info[j].thread != (pthread_t)NULL) {
+						pthread_cancel(q_info[j].thread);
+						pthread_join(q_info[j].thread, NULL);
+					}
+				}
+				return ret;
+			}
+			printf("Receiver thread for queue %d created on core %d\n", q_info[i].qid, q_info[i].core_id);
+		}
 	}
-
-	size = pkt_sz;
-
-	infile_fd = open(input_file, O_RDONLY | O_NONBLOCK);
-	if (infile_fd < 0) {
-		printf("Error: unable to open input file %s, ret :%d\n",
-				input_file, infile_fd);
-		return infile_fd;
-	}
-
-	offset = 0;
-	posix_memalign((void **)&allocated, 4096 /*alignment */ , size + 4096);
-	if (!allocated) {
-		printf("Error: OOM %u.\n", size + 4096);
-		ret = -ENOMEM;
-		goto out;
-	}
-
-	buffer = allocated + offset;
-	ret = read_to_buffer(input_file, infile_fd, buffer, size, 0);
-	if (ret < 0)
-		goto out;
-
-	if (io_type == 0) {
-		ret = qdmautils_sync_xfer(q_info->q_name,
-				q_info->dir, buffer, size);
-		if (ret < 0)
-			printf("Error: QDMA SYNC transfer Failed, ret :%d\n", ret);
-		else
-			printf("PF :%d Queue :%d H2C Sync transfer success\n", q_info->pf, q_info->qid);
-	} else {
-		ret = qdmautils_async_xfer(q_info->q_name,
-				q_info->dir, buffer, size);
-		if (ret < 0)
-			printf("Error: QDMA ASYNC transfer Failed, ret :%d\n", ret);
-		else
-			printf("PF :%d Queue :%d H2C Async transfer success\n", q_info->pf, q_info->qid);
-	}
-
-out:
-	free(allocated);
-	close(infile_fd);
-
-	return ret;
+	return 0;
 }
+
+// static int qdmautils_read(struct queue_info *q_info,
+// 		char *output_file, int io_type)
+// {
+// 	int outfile_fd = -1;
+// 	char *buffer = NULL;
+// 	char *allocated = NULL;
+// 	unsigned int size;
+// 	unsigned int offset;
+// 	int ret;
+
+// 	//if (!q_info || !input_file) {
+// 	if (!q_info) {
+// 		printf("Error: Invalid input params\n");
+// 		return -EINVAL;
+// 	}
+
+// 	size = pkt_sz;
+
+// 	outfile_fd = open(output_file, O_WRONLY | O_CREAT | O_TRUNC | O_SYNC);
+// 	if (outfile_fd < 0) {
+// 		printf("Error: unable to open/create output file %s, ret :%d\n",
+// 				output_file, outfile_fd);
+// 		perror("open/create output file");
+// 		return outfile_fd;
+// 	}
+
+// 	offset = 0;
+// 	posix_memalign((void **)&allocated, 4096 /*alignment */ , size + 4096);
+// 	if (!allocated) {
+// 		printf("Error: OOM %u.\n", size + 4096);
+// 		ret = -ENOMEM;
+// 		goto out;
+// 	}
+// 	buffer = allocated + offset;
+
+// 	if (io_type == 0) {
+// 		ret = qdmautils_sync_xfer(q_info->q_name,
+// 				q_info->dir, buffer, size);
+// 		if (ret < 0)
+// 			printf("Error: QDMA SYNC transfer Failed, ret :%d\n", ret);
+// 		else
+// 			printf("PF :%d Queue :%d C2H Sync transfer success\n", q_info->pf, q_info->qid);
+// 	} else {
+// 		ret = qdmautils_async_xfer(q_info->q_name,
+// 				q_info->dir, buffer, size);
+// 		if (ret < 0)
+// 			printf("Error: QDMA ASYNC transfer Failed, ret :%d\n", ret);
+// 		else
+// 			printf("PF :%d Queue :%d C2H ASync transfer success\n", q_info->pf, q_info->qid);
+// 	}
+// 	if (ret < 0)
+// 		goto out;
+
+// 	ret = write_from_buffer(output_file, outfile_fd, buffer, size, offset);
+// 	if (ret < 0)
+// 		printf("Error: Write from buffer to %s failed\n", output_file);
+// out:
+// 	free(allocated);
+// 	close(outfile_fd);
+
+// 	return ret;
+// }
+
+// static int qdmautils_write(struct queue_info *q_info,
+// 		char *input_file, int io_type)
+// {
+// 	int infile_fd = -1;
+// 	int outfile_fd = -1;
+// 	char *buffer = NULL;
+// 	char *allocated = NULL;
+// 	unsigned int size;
+// 	unsigned int offset;
+// 	int ret;
+// 	enum qdmautils_io_dir dir;
+
+// 	if (!q_info || !input_file) {
+// 		printf("Error: Invalid input params\n");
+// 		return -EINVAL;
+// 	}
+
+// 	size = pkt_sz;
+
+// 	infile_fd = open(input_file, O_RDONLY | O_NONBLOCK);
+// 	if (infile_fd < 0) {
+// 		printf("Error: unable to open input file %s, ret :%d\n",
+// 				input_file, infile_fd);
+// 		return infile_fd;
+// 	}
+
+// 	offset = 0;
+// 	posix_memalign((void **)&allocated, 4096 /*alignment */ , size + 4096);
+// 	if (!allocated) {
+// 		printf("Error: OOM %u.\n", size + 4096);
+// 		ret = -ENOMEM;
+// 		goto out;
+// 	}
+
+// 	buffer = allocated + offset;
+// 	ret = read_to_buffer(input_file, infile_fd, buffer, size, 0);
+// 	if (ret < 0)
+// 		goto out;
+
+// 	if (io_type == 0) {
+// 		ret = qdmautils_sync_xfer(q_info->q_name,
+// 				q_info->dir, buffer, size);
+// 		if (ret < 0)
+// 			printf("Error: QDMA SYNC transfer Failed, ret :%d\n", ret);
+// 		else
+// 			printf("PF :%d Queue :%d H2C Sync transfer success\n", q_info->pf, q_info->qid);
+// 	} else {
+// 		ret = qdmautils_async_xfer(q_info->q_name,
+// 				q_info->dir, buffer, size);
+// 		if (ret < 0)
+// 			printf("Error: QDMA ASYNC transfer Failed, ret :%d\n", ret);
+// 		else
+// 			printf("PF :%d Queue :%d H2C Async transfer success\n", q_info->pf, q_info->qid);
+// 	}
+
+// out:
+// 	free(allocated);
+// 	close(infile_fd);
+
+// 	return ret;
+// }
 
 static int qdmautils_xfer(struct queue_info *q_info,
 		unsigned int count, unsigned char user_bar, unsigned int qbase, int io_type)
@@ -1339,12 +1352,17 @@ static int qdmautils_xfer(struct queue_info *q_info,
 	printf("Packet generator started. Monitoring %d queues...\n", count);
 
 	uint64_t hz = 1000000000;
-	uint64_t prev_time = ktime_get_ns();
+	// uint64_t prev_time = ktime_get_ns();
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	uint64_t prev_time = ts.tv_sec * 1000000000ULL + ts.tv_nsec;
 	uint64_t curr_time = prev_time;
 	uint64_t diff_time = 0;
 
 	while(1) {
-		curr_time = ktime_get_ns();
+		// curr_time = ktime_get_ns();
+		clock_gettime(CLOCK_MONOTONIC, &ts);
+		curr_time = ts.tv_sec * 1000000000ULL + ts.tv_nsec;
 		diff_time = curr_time - prev_time;
 		
 		if (diff_time > hz) {
@@ -1498,7 +1516,8 @@ int main(int argc, char *argv[])
 	qbase = xcmd.resp.dev_info.qbase;
 
 	//start the packet generator
-	ret = qdma_setup_fpga_generator(q_info, q_count, user_bar, qbase);
+	//ret = qdma_setup_fpga_generator(q_info, q_count, user_bar, qbase);
+	ret = qdma_setup_fpga_generator(q_info, num_q, user_bar, qbase);
 	if (ret < 0) {
 		printf("Failed to trigger data generator\n");
 		return ret;
