@@ -78,6 +78,7 @@ static unsigned int traffic_pattern = 0;  // Default traffic pattern
 //static unsigned int user_bar = 0;        // User BAR number
 //static unsigned int qbase = 0;           // Queue base
 static unsigned int num_cores = 0;       // Number of cores
+static volatile sig_atomic_t shutdown_threads = 0;
 //original
 enum qdma_q_mode mode;
 enum qdma_q_dir dir;
@@ -841,14 +842,17 @@ static int qdma_destroy_queue(enum qdmautils_io_dir dir,
 	memset(&xcmd, 0, sizeof(struct xcmd_info));
 	ret = qdma_prepare_q_stop(&xcmd, dir, qid, pf);
 	if (ret < 0)
-		return ret;
+		printf("Q_PREP_STOP failed, ret :%d\n", ret);
 
 	ret = qdma_q_stop(&xcmd);
 	if (ret < 0)
 		printf("Q_STOP failed, ret :%d\n", ret);
 
 	memset(&xcmd, 0, sizeof(struct xcmd_info));
-	qdma_prepare_q_del(&xcmd, dir, qid, pf);
+	ret = qdma_prepare_q_del(&xcmd, dir, qid, pf);
+	if (ret < 0)
+		printf("Q_PREP_DEL failed, ret :%d\n", ret);
+
 	ret = qdma_q_del(&xcmd);
 	if (ret < 0)
 		printf("Q_DEL failed, ret :%d\n", ret);
@@ -962,13 +966,7 @@ static void qdma_queues_cleanup(struct queue_info *q_info, int q_count)
 		return;
 
 	for (q_index = 0; q_index < q_count; q_index++) {
-		// Clean up the receiver thread
-		if (q_info[q_index].thread != (pthread_t)NULL) {
-			pthread_cancel(q_info[q_index].thread);
-			pthread_join(q_info[q_index].thread, NULL);
-		}
 		// Clean up the queue
-		//pthread_mutex_destroy(&q_info[q_index].packet_mutex);
 		qdma_destroy_queue(q_info[q_index].dir,
 				q_info[q_index].qid,
 				q_info[q_index].pf);
@@ -1117,7 +1115,7 @@ static int qdma_stop_generator(struct queue_info *q_info, unsigned char user_bar
 	int ret = 0;
 	ret = qdma_register_write(q_info->pf, user_bar, 0x08, 0x40);
 	if (ret < 0) {
-		printf("Failed to set traffic pattern PF :%d\n", q_info->pf);
+		printf("Failed to set end C2H generator PF :%d\n", q_info->pf);
 	}
 	return ret;
 }
@@ -1154,7 +1152,7 @@ static void *qdma_packet_receiver(void *arg)
 	printf("Thread/Queue %d started on core %d\n", q_info->qid, q_info->core_id);
 
 	//Main packet reception loop
-	while(1) {
+	while(!shutdown_threads) {
 		ret = qdmautils_async_xfer(q_info->q_name, q_info->dir, buffer, pkt_sz);
 		if (ret > 0) {
 			local_packet_count++;
@@ -1166,9 +1164,10 @@ static void *qdma_packet_receiver(void *arg)
 			usleep(100);
 		}
 		//check for thread cancellation
-		pthread_testcancel();
+		//pthread_testcancel();
 	}
 	free(allocated);
+	printf("Thread/Queue %d terminated gracefully after %lu packets\n", q_info->qid, local_packet_count);
 	return NULL;
 }
 
@@ -1196,6 +1195,267 @@ static int qdma_create_receiver_thread(struct queue_info *q_info, int q_count)
 	}
 	return 0;
 }
+
+static void qdma_terminate_receiver_threads(struct queue_info *q_info, int q_count) {
+	int i;
+	struct timespec timeout;
+	int ret;
+	if (!q_info || q_count <= 0)
+		return;
+	printf("Terminating receiver threads for %d queues\n", q_count);
+	//Step 1: Signal all threads to stop
+	shutdown_threads = 1;
+	printf("Shutdown signal sent to all receiver threads\n");
+	//Step 2: Give threads time to see the shutdown signal
+	usleep(200000); //200ms for threads to process the signal
+	//Step 3: Wait for each thread to terminate gracefully
+	for (i = 0; i < q_count;i++) {
+		if (q_info[i].dir == DMAXFER_IO_READ && q_info[i].thread != (pthread_t)NULL) {
+			printf("Waiting for thread %d to terminate gracefully\n", q_info[i].qid);
+			//Set timeout for graceful termination
+			clock_gettime(CLOCK_REALTIME, &timeout);
+			timeout.tv_sec += 2;
+
+			ret = pthread_timedjoin_np(q_info[i].thread, NULL, &timeout);
+			if (ret == 0) {
+				printf("Receiver thread %d terminated gracefully\n", q_info[i].qid);
+				q_info[i].thread = (pthread_t)NULL;
+			} else if (ret == ETIMEDOUT) {
+				pthread_cancel(q_info[i].thread);
+				pthread_join(q_info[i].thread, NULL);
+				q_info[i].thread = (pthread_t)NULL;
+				printf("Warning: Receiver thread %d timed out, terminating forcefully\n", q_info[i].qid);
+			} else {
+				pthread_cancel(q_info[i].thread);
+				pthread_join(q_info[i].thread, NULL);
+				q_info[i].thread - (pthread_t)NULL;
+				printf("Warning: Failed to join receiver thread %d: %s\n", q_info[i].qid, strerror(ret));
+			}
+		}
+	}
+	printf("All receiver threads terminated\n");
+}
+
+static int qdmautils_xfer(struct queue_info *q_info,
+		unsigned int count, unsigned char user_bar, unsigned int qbase, int io_type)
+{
+	int ret;
+	uint64_t total_packets = 0;
+	uint64_t prev_total = 0;
+	uint64_t packets_per_sec = 0;
+	int i;
+	time_t start_time = time(NULL);
+	time_t current_time;
+
+	if (!q_info || count == 0) {
+		printf("Error: Invalid input params\n");
+		return -EINVAL;
+	}
+	shutdown_threads = 0;
+	//start the packet generator
+	// ret = qdma_trigger_data_generator(q_info, count, user_bar, qbase);
+	// if (ret < 0) {
+	// 	printf("Failed to trigger data generator\n");
+	// 	return ret;
+	// }
+	ret = qdma_start_generator(q_info, user_bar);
+	if (ret < 0) {
+		printf("Failed to start packet generator\n");
+		return ret;
+	}
+
+	printf("Packet generator started. Monitoring %d queues...\n", count);
+
+	uint64_t hz = 1000000000;
+	// uint64_t prev_time = ktime_get_ns();
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	uint64_t prev_time = ts.tv_sec * 1000000000ULL + ts.tv_nsec;
+	uint64_t curr_time = prev_time;
+	uint64_t diff_time = 0;
+
+	while(1) {
+		// curr_time = ktime_get_ns();
+		clock_gettime(CLOCK_MONOTONIC, &ts);
+		curr_time = ts.tv_sec * 1000000000ULL + ts.tv_nsec;
+		diff_time = curr_time - prev_time;
+		
+		if (diff_time > hz) {
+			total_packets = 0;
+			//Sum up packets from all threads - atomic_fetch_add
+			for (i = 0; i < count; i++) {
+				if (q_info[i].dir == DMAXFER_IO_READ) {
+					total_packets += atomic_load(&q_info[i].packets_received);
+				}
+			}
+
+			//Caclulate packets per second
+			packets_per_sec = total_packets - prev_total;
+			prev_total = total_packets;
+			printf("Total packets: %lu, Rate: %lu pps\n",
+				total_packets, packets_per_sec);
+
+			prev_time = curr_time;
+
+		}
+		current_time = time(NULL);
+		if (current_time - start_time >= 10) {
+			printf("10 seconds elapsed. Stopping packet generator...\n");
+			break;
+		}
+		usleep(10000); //10ms
+	}
+	//Stop the generator
+	ret = qdma_stop_generator(q_info, user_bar);
+	if (ret < 0) {
+		printf("Failed to stop packet generator\n");
+	}
+	qdma_terminate_receiver_threads(q_info, count);
+	//Final statistics
+	total_packets = 0;
+	for (i = 0; i < count; i++) {
+		if (q_info[i].dir == DMAXFER_IO_READ) {
+			total_packets += atomic_load(&q_info[i].packets_received);
+		}
+	}
+	printf("Total packets received: %lu\n", total_packets);
+	return ret;
+	// for (i = 0; i < count; i++) {
+	// 	if (q_info[i].dir == DMAXFER_IO_WRITE) {
+	// 		/* Transfer DATA from inputfile to Device */
+	// 		ret = qdmautils_write(q_info + i, input_file, io_type);
+	// 		if (ret < 0)
+	// 			printf("qdmautils_write failed, ret :%d\n", ret);
+	// 	} else {
+	// 		if (mode == QDMA_Q_MODE_ST) {
+	// 			/* Generate ST - C2H Data before trying to read from Card */
+	// 			ret = qdma_trigger_data_generator(q_info + i);
+	// 			if (ret < 0) {
+	// 				printf("Failed to trigger data generator\n");
+	// 				return ret;
+	// 			}
+	// 		}
+	// 		/* Reads data from Device and writes into output file */
+	// 		ret = qdmautils_read(q_info + i, output_file, io_type);
+	// 		if (ret < 0)
+	// 			printf("qdmautils_read failed, ret :%d\n", ret);
+	// 	}
+
+	// 	if (ret < 0)
+	// 		break;
+	// }
+
+	//qdma_stop_generator(q_info, user_bar);
+	//return ret;
+}
+
+int main(int argc, char *argv[])
+{
+	char *cfg_fname;
+	int cmd_opt;
+	int ret;
+
+	if (argc == 2) {
+		if (!strcmp(argv[1], "-v") || !strcmp(argv[1], "--version")) {
+			printf("%s version %s\n", PROGNAME, VERSION);
+			printf("%s\n", COPYRIGHT);
+			return 0;
+		}
+	}
+
+	cfg_fname = NULL;
+	while ((cmd_opt = getopt_long(argc, argv, "vhxc:c:", long_opts,
+					NULL)) != -1) {
+		switch (cmd_opt) {
+			case 0:
+				/* long option */
+				break;
+			case 'c':
+				/* config file name */
+				cfg_fname = strdup(optarg);
+				break;
+			default:
+				usage(argv[0]);
+				exit(0);
+				break;
+		}
+	}
+
+	if (cfg_fname == NULL) {
+		printf("Config file required.\n");
+		usage(argv[0]);
+		return -EINVAL;
+	}
+
+	ret = parse_config_file(cfg_fname);
+	if (ret < 0) {
+		printf("Config File has invalid parameters\n");
+		return ret;
+	}
+
+	ret = qdma_validate_qrange();
+	if (ret < 0)
+		return ret;
+
+	q_count = 0;
+	/* Addition and Starting of queues handled here */
+	q_count = qdma_setup_queues(&q_info);
+	if (q_count < 0) {
+		printf("qdma_setup_queues failed, ret:%d\n", q_count);
+		return q_count;
+	}
+	
+	/* queues has to be deleted upon termination */
+	atexit(qdma_env_cleanup);
+
+	/* setup qdma dev*/
+	struct xcmd_info xcmd;
+	unsigned char user_bar;
+	unsigned int qbase;
+
+	if (!q_info) {
+		printf("Error: Invalid queue info\n");
+		return -EINVAL;
+	}
+
+	memset(&xcmd, 0, sizeof(struct xcmd_info));
+	xcmd.op = XNL_CMD_DEV_INFO;
+	xcmd.vf = is_vf;
+	xcmd.if_bdf = (pci_bus << 12) | (pci_dev << 4) | q_info->pf;
+
+	ret = qdma_dev_info(&xcmd);
+	if (ret < 0) {
+		printf("Failed to read qmax for PF: %d\n", q_info->pf);
+		return ret;
+	}
+
+	user_bar = xcmd.resp.dev_info.user_bar;
+	qbase = xcmd.resp.dev_info.qbase;
+
+	//start the packet generator
+	//ret = qdma_setup_fpga_generator(q_info, q_count, user_bar, qbase);
+	ret = qdma_setup_fpga_generator(q_info, num_q, user_bar, qbase);
+	if (ret < 0) {
+		printf("Failed to trigger data generator\n");
+		return ret;
+	}
+
+	ret = qdma_create_receiver_thread(q_info, q_count);
+	if (ret < 0) {
+		printf("Failed to create receiver threads\n");
+		qdma_queues_cleanup(q_info, q_count);
+		return ret;
+	}
+
+	/* Perform DMA transfers on each Queue */
+	ret = qdmautils_xfer(q_info, q_count, user_bar, qbase, io_type);
+	if (ret < 0)
+		printf("Qdmautils Transfer Failed, ret :%d\n", ret);
+
+	free(cfg_fname);
+	return ret;
+}
+
 
 // static int qdmautils_read(struct queue_info *q_info,
 // 		char *output_file, int io_type)
@@ -1321,219 +1581,3 @@ static int qdma_create_receiver_thread(struct queue_info *q_info, int q_count)
 
 // 	return ret;
 // }
-
-static int qdmautils_xfer(struct queue_info *q_info,
-		unsigned int count, unsigned char user_bar, unsigned int qbase, int io_type)
-{
-	int ret;
-	uint64_t total_packets = 0;
-	uint64_t prev_total = 0;
-	uint64_t packets_per_sec = 0;
-	int i;
-	time_t start_time = time(NULL);
-	time_t current_time;
-
-	if (!q_info || count == 0) {
-		printf("Error: Invalid input params\n");
-		return -EINVAL;
-	}
-	//start the packet generator
-	// ret = qdma_trigger_data_generator(q_info, count, user_bar, qbase);
-	// if (ret < 0) {
-	// 	printf("Failed to trigger data generator\n");
-	// 	return ret;
-	// }
-	ret = qdma_start_generator(q_info, user_bar);
-	if (ret < 0) {
-		printf("Failed to start packet generator\n");
-		return ret;
-	}
-
-	printf("Packet generator started. Monitoring %d queues...\n", count);
-
-	uint64_t hz = 1000000000;
-	// uint64_t prev_time = ktime_get_ns();
-	struct timespec ts;
-	clock_gettime(CLOCK_MONOTONIC, &ts);
-	uint64_t prev_time = ts.tv_sec * 1000000000ULL + ts.tv_nsec;
-	uint64_t curr_time = prev_time;
-	uint64_t diff_time = 0;
-
-	while(1) {
-		// curr_time = ktime_get_ns();
-		clock_gettime(CLOCK_MONOTONIC, &ts);
-		curr_time = ts.tv_sec * 1000000000ULL + ts.tv_nsec;
-		diff_time = curr_time - prev_time;
-		
-		if (diff_time > hz) {
-			total_packets = 0;
-			//Sum up packets from all threads - atomic_fetch_add
-			for (i = 0; i < count; i++) {
-				if (q_info[i].dir == DMAXFER_IO_READ) {
-					total_packets += atomic_load(&q_info[i].packets_received);
-				}
-			}
-
-			//Caclulate packets per second
-			packets_per_sec = total_packets - prev_total;
-			prev_total = total_packets;
-			printf("Total packets: %lu, Rate: %lu pps\n",
-				total_packets, packets_per_sec);
-
-			prev_time = curr_time;
-
-		}
-		current_time = time(NULL);
-		if (current_time - start_time >= 10) {
-			printf("10 seconds elapsed. Stopping packet generator...\n");
-			break;
-		}
-		usleep(10000); //10ms
-	}
-	//Stop the generator
-	ret = qdma_stop_generator(q_info, user_bar);
-	if (ret < 0) {
-		printf("Failed to stop packet generator\n");
-	}
-	//Final statistics
-	total_packets = 0;
-	for (i = 0; i < count; i++) {
-		if (q_info[i].dir == DMAXFER_IO_READ) {
-			total_packets += atomic_load(&q_info[i].packets_received);
-		}
-	}
-	printf("Total packets received: %lu\n", total_packets);
-	// for (i = 0; i < count; i++) {
-	// 	if (q_info[i].dir == DMAXFER_IO_WRITE) {
-	// 		/* Transfer DATA from inputfile to Device */
-	// 		ret = qdmautils_write(q_info + i, input_file, io_type);
-	// 		if (ret < 0)
-	// 			printf("qdmautils_write failed, ret :%d\n", ret);
-	// 	} else {
-	// 		if (mode == QDMA_Q_MODE_ST) {
-	// 			/* Generate ST - C2H Data before trying to read from Card */
-	// 			ret = qdma_trigger_data_generator(q_info + i);
-	// 			if (ret < 0) {
-	// 				printf("Failed to trigger data generator\n");
-	// 				return ret;
-	// 			}
-	// 		}
-	// 		/* Reads data from Device and writes into output file */
-	// 		ret = qdmautils_read(q_info + i, output_file, io_type);
-	// 		if (ret < 0)
-	// 			printf("qdmautils_read failed, ret :%d\n", ret);
-	// 	}
-
-	// 	if (ret < 0)
-	// 		break;
-	// }
-
-	//qdma_stop_generator(q_info, user_bar);
-	return ret;
-}
-
-int main(int argc, char *argv[])
-{
-	char *cfg_fname;
-	int cmd_opt;
-	int ret;
-
-	if (argc == 2) {
-		if (!strcmp(argv[1], "-v") || !strcmp(argv[1], "--version")) {
-			printf("%s version %s\n", PROGNAME, VERSION);
-			printf("%s\n", COPYRIGHT);
-			return 0;
-		}
-	}
-
-	cfg_fname = NULL;
-	while ((cmd_opt = getopt_long(argc, argv, "vhxc:c:", long_opts,
-					NULL)) != -1) {
-		switch (cmd_opt) {
-			case 0:
-				/* long option */
-				break;
-			case 'c':
-				/* config file name */
-				cfg_fname = strdup(optarg);
-				break;
-			default:
-				usage(argv[0]);
-				exit(0);
-				break;
-		}
-	}
-
-	if (cfg_fname == NULL) {
-		printf("Config file required.\n");
-		usage(argv[0]);
-		return -EINVAL;
-	}
-
-	ret = parse_config_file(cfg_fname);
-	if (ret < 0) {
-		printf("Config File has invalid parameters\n");
-		return ret;
-	}
-
-	ret = qdma_validate_qrange();
-	if (ret < 0)
-		return ret;
-
-	q_count = 0;
-	/* Addition and Starting of queues handled here */
-	q_count = qdma_setup_queues(&q_info);
-	if (q_count < 0) {
-		printf("qdma_setup_queues failed, ret:%d\n", q_count);
-		return q_count;
-	}
-	
-	/* queues has to be deleted upon termination */
-	atexit(qdma_env_cleanup);
-
-	/* setup qdma dev*/
-	struct xcmd_info xcmd;
-	unsigned char user_bar;
-	unsigned int qbase;
-
-	if (!q_info) {
-		printf("Error: Invalid queue info\n");
-		return -EINVAL;
-	}
-
-	memset(&xcmd, 0, sizeof(struct xcmd_info));
-	xcmd.op = XNL_CMD_DEV_INFO;
-	xcmd.vf = is_vf;
-	xcmd.if_bdf = (pci_bus << 12) | (pci_dev << 4) | q_info->pf;
-
-	ret = qdma_dev_info(&xcmd);
-	if (ret < 0) {
-		printf("Failed to read qmax for PF: %d\n", q_info->pf);
-		return ret;
-	}
-
-	user_bar = xcmd.resp.dev_info.user_bar;
-	qbase = xcmd.resp.dev_info.qbase;
-
-	//start the packet generator
-	//ret = qdma_setup_fpga_generator(q_info, q_count, user_bar, qbase);
-	ret = qdma_setup_fpga_generator(q_info, num_q, user_bar, qbase);
-	if (ret < 0) {
-		printf("Failed to trigger data generator\n");
-		return ret;
-	}
-
-	ret = qdma_create_receiver_thread(q_info, q_count);
-	if (ret < 0) {
-		printf("Failed to create receiver threads\n");
-		qdma_queues_cleanup(q_info, q_count);
-		return ret;
-	}
-
-	/* Perform DMA transfers on each Queue */
-	ret = qdmautils_xfer(q_info, q_count, user_bar, qbase, io_type);
-	if (ret < 0)
-		printf("Qdmautils Transfer Failed, ret :%d\n", ret);
-
-	return ret;
-}
