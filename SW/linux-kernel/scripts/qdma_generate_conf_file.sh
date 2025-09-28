@@ -74,48 +74,48 @@ fi
 generate_conf()
 {
 	conf_file="qdma.conf"
-	echo -n "options qdma-pf mode=" > conf_file
+	echo -n "options qdma-pf mode=" > $conf_file
 	for ((j = 0; j < ${num_pfs}; j++))
 	do
-		echo -n "${bus_num}:${j}:${mode}" >> conf_file
+		echo -n "${bus_num}:${j}:${mode}" >> $conf_file
 		if [ $j != $((${num_pfs} - 1)) ]; then
-			echo -n "," >> conf_file
+			echo -n "," >> $conf_file
 		fi	
 	done
-	echo -e "" >> conf_file
-	echo -n "options qdma-pf config_bar=" >> conf_file
+	echo -e "" >> $conf_file
+	echo -n "options qdma-pf config_bar=" >> $conf_file
 	for ((j = 0; j < ${num_pfs}; j++))
 	do
-		echo -n "${bus_num}:${j}:${config_bar}" >> conf_file
+		echo -n "${bus_num}:${j}:${config_bar}" >> $conf_file
 		if [ $j != $((${num_pfs} - 1)) ]; then
-			echo -n "," >> conf_file
+			echo -n "," >> $conf_file
 		fi	 
 	done
-	echo -e "" >> conf_file
-	echo -n "options qdma-pf master_pf=${bus_num}:${master_pf}" >> conf_file
+	echo -e "" >> $conf_file
+	echo -n "options qdma-pf master_pf=${bus_num}:${master_pf}" >> $conf_file
 	
-	echo -e "" >> conf_file
-	echo -n "options qdma-vf mode=" >> conf_file
+	echo -e "" >> $conf_file
+	echo -n "options qdma-vf mode=" >> $conf_file
 	for ((j = 0; j < ${num_pfs}; j++))
 	do
-		echo -n "${bus_num}:${j}:${mode}" >> conf_file
+		echo -n "${bus_num}:${j}:${mode}" >> $conf_file
 		if [ $j != $((${num_pfs} - 1)) ]; then
-			echo -n "," >> conf_file
+			echo -n "," >> $conf_file
 		fi	
 	done
-	echo -e "" >> conf_file
-	echo -n "options qdma-vf config_bar=" >> conf_file
+	echo -e "" >> $conf_file
+	echo -n "options qdma-vf config_bar=" >> $conf_file
 	for ((j = 0; j < ${num_pfs}; j++))
 	do
-		echo -n "${bus_num}:${j}:${config_bar}" >> conf_file
+		echo -n "${bus_num}:${j}:${config_bar}" >> $conf_file
 		if [ $j != $((${num_pfs} - 1)) ]; then
-			echo -n "," >> conf_file
+			echo -n "," >> $conf_file
 		fi	 
 	done
 	
 	rm -rf /etc/modprobe.d/qdma.conf
-	cp conf_file /etc/modprobe.d/qdma.conf
-	rm -rf conf_file
+	cp $conf_file /etc/modprobe.d/qdma.conf
+	rm -rf $conf_file
 }
 
 generate_conf

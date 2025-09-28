@@ -33,31 +33,36 @@ static int recv_pkt_single_core(input_arg_t* inputs) { // for each lcore
     int** core_to_q = inputs->core_to_q;
     int numpkts = inputs->numpkts;
     int portid = inputs->portid;
-    struct rte_mbuf *pkts[NUM_RX_PKTS] = { NULL };
-    int nb_rx, nb_tx;
+    struct rte_mbuf *pkts[BURST_SIZE] = { NULL };
+    int nb_rx = 0, nb_tx;
 
     printf("start test on core %d\n", idx);
     size_t offset = sizeof(struct rte_ether_hdr) + sizeof(struct rte_ipv4_hdr) + sizeof(struct rte_udp_hdr);
     uint32_t input_data = 0;
 
     while(!test_finished) {
-        idx2 = 0;
-        while(core_to_q[idx][idx2] != -1) {
-            // rte_delay_us(1);
-            nb_rx = rte_eth_rx_burst(portid, core_to_q[idx][idx2], pkts, BURST_SIZE);
-            // for (int i = 0; i < nb_rx; i++) {
-            //     uint32_t *data = rte_pktmbuf_mtod_offset(pkts[i], uint32_t *, offset);
-            //     input_data += data[0];
-            // }
-            nb_tx = rte_eth_tx_burst(portid, core_to_q[idx][idx2], pkts, nb_rx);
+        // if (idx == 0) {
+            idx2 = 0;
+            while(core_to_q[idx][idx2] != -1) {
+                // rte_delay_us(1);
+                // if (idx == 0) {
+                    nb_rx = rte_eth_rx_burst(portid, core_to_q[idx][idx2], pkts, BURST_SIZE);
+                    // for (int i = 0; i < nb_rx; i++) {
+                    //     uint32_t *data = rte_pktmbuf_mtod_offset(pkts[i], uint32_t *, offset);
+                    //     input_data += data[0];
+                    // }
+                // }
+                if (nb_rx > 0) {
+                    nb_tx = rte_eth_tx_burst(portid, core_to_q[idx][idx2], pkts, nb_rx);
+                    packet_recv_per_core[idx] += nb_tx;
 
-            packet_recv_per_core[idx] += nb_rx;
-
-            for (int i = nb_tx; i < nb_rx; i++) {
-                rte_pktmbuf_free(pkts[i]);
+                    for (int i = nb_tx; i < nb_rx; i++) {
+                        rte_pktmbuf_free(pkts[i]);
+                    }
+                }
+                idx2++;
             }
-            idx2++;
-        }
+        // }
     }
     return 0;
 }
@@ -90,7 +95,7 @@ int main(int argc, char* argv[]) {
     if (ret < 0) {
         rte_exit(EXIT_FAILURE, "Invalid EAL arguments\n");
     }
-    rte_log_set_global_level(RTE_LOG_ERR);
+    // rte_log_set_global_level(RTE_LOG_DEBUG);
 
     argc -= ret;
     argv += ret;
@@ -107,8 +112,8 @@ int main(int argc, char* argv[]) {
     if (num_ports < 1)
         rte_exit(EXIT_FAILURE, "No Ethernet devices found. Try updating the FPGA image.\n");
 
-    for (int portid = 0; portid < num_ports; portid++)
-        rte_spinlock_init(&pinfo[portid].port_update_lock);
+    // for (int portid = 0; portid < num_ports; portid++)
+    //     rte_spinlock_init(&pinfo[portid].port_update_lock);
 
     /* Allocate aligned mezone */
     rte_pmd_qdma_compat_memzone_reserve_aligned();
@@ -154,25 +159,33 @@ int main(int argc, char* argv[]) {
     int size;
     double pkts_per_second, throughput_gbps;
     user_bar_idx = pinfo[port].user_bar_idx;
-
-    int qid = 0;
+    int qid = 0, qid1 = 0;
+#if CHANGE_INDRECT_TABLE == 1
+    for (i = 0 ; i < 16 ; i++) {
+        PciWrite(user_bar_idx, RSS_START + (i*4), qid + qbase, port);
+        // qid = (qid + 1) % 3;
+    }
+#else 
     for (i = 0 ; i < 16 ; i++) {
         PciWrite(user_bar_idx, RSS_START + (i*4), qid+qbase, port);
         qid = (qid + 1) % num_queues;
     }
+#endif
 
     double arr[10];
     int index = 0;
     uint64_t hz = rte_get_timer_hz();
     uint64_t ms = 0.1 * hz;
     uint64_t interval_cycles = interval * hz;
+    bool first = true;
 
     max_completion_size = pktsize; //datasize + headersize
-    printf("max_completion_size: %d\n", max_completion_size);
     PciWrite(user_bar_idx, C2H_PACKET_COUNT_REG, numpkts, port);
     PciWrite(user_bar_idx, C2H_ST_LEN_REG, max_completion_size, port);
     PciWrite(user_bar_idx, CYCLES_PER_PKT, cycles, port);
     PciWrite(user_bar_idx, C2H_NUM_QUEUES, num_queues, port);
+    reg_val = PciRead(user_bar_idx, CYCLES_PER_PKT, port);
+    printf("max_completion_size: %d, cycles: %d\n", max_completion_size, reg_val);
 
     qid = 0;
     double time_elapsed = 0.0, time_elapsed2 = 0.0;
@@ -185,6 +198,9 @@ int main(int argc, char* argv[]) {
     temp->numpkts = numpkts;
     temp->portid = port;
 
+
+    rte_eal_mp_remote_launch((lcore_function_t*)&recv_pkt_single_core, temp, SKIP_MAIN);
+    sleep(1);
     /* Start the C2H Engine */
     PciWrite(user_bar_idx, C2H_ST_QID_REG, qbase, port);
     reg_val = PciRead(user_bar_idx, C2H_CONTROL_REG, port);
@@ -193,8 +209,6 @@ int main(int argc, char* argv[]) {
 
     prev_tsc = rte_rdtsc_precise();
     test_tsc = prev_tsc;
-
-    rte_eal_mp_remote_launch((lcore_function_t*)&recv_pkt_single_core, temp, SKIP_MAIN);
 
     // Monitor and print
     while(1){
@@ -208,30 +222,42 @@ int main(int argc, char* argv[]) {
             }
             prev_tsc = cur_tsc;
             index++;
-            // if (cur_tsc - test_tsc < 5*hz) {
-            //     for (i = 0 ; i < 16 ; i++) {
-            //         PciWrite(user_bar_idx, RSS_START + (i*4), qid1+qbase, portid);
-            //     }
-            //     qid1 = (qid1 + 1) % num_queues;
-            // }
+// #if CHANGE_INDRECT_TABLE == 1
+//             if (cur_tsc - test_tsc < 5*hz) {
+//                 for (i = 0 ; i < 16 ; i++) {
+//                     PciWrite(user_bar_idx, RSS_START + (i*4), qid1+qbase, port);
+//                 }
+//                 qid1 = (qid1 + 1) % num_queues;
+//             }
+// #endif
         }
-        // if ((cur_tsc - test_tsc >= 5 * hz) && first) {
-        //     first = false;
-        //     for (i = 0 ; i < 16 ; i++) {
-        //         PciWrite(user_bar_idx, RSS_START + (i*4), qid+qbase, portid);
-        //         qid = (qid + 1) % num_queues;
-        //     }
-        // }
+#if CHANGE_INDRECT_TABLE == 1
+        if ((cur_tsc - test_tsc >= 5 * hz) && first) {
+            first = false;
+            for (i = 0 ; i < 16 ; i++) {
+                PciWrite(user_bar_idx, RSS_START + (i*4), qid+qbase, port);
+                qid = (qid + 1) % 3;
+            }
+        }
+#endif
         if (cur_tsc - test_tsc >= interval_cycles) {
             test_finished = 1;
             break;
         }
     }
+    diff_tsc = rte_rdtsc_precise() - test_tsc;
 
     /* Stop the C2H Engine */
     reg_val = PciRead(user_bar_idx, C2H_CONTROL_REG, port); 
     reg_val |= ST_C2H_END_VAL;
     PciWrite(user_bar_idx, C2H_CONTROL_REG, reg_val,port);
+    int number_pkts = 0;
+    for (int i = 0; i < num_lcores-1; i++) {
+        number_pkts += packet_recv_per_core[i];
+        printf("c%d %ld\n", i, packet_recv_per_core[i]);
+    }
+    rate = (double)(number_pkts) * max_completion_size * 8.0 / (double)diff_tsc * (double)hz / 1000000000.0;
+    printf("Throughput is %lf Gbps\n", rate);
 
     /* Calculate average throughput (Gbps) in bits per second */
     // throughput_gbps = pinfo[port].buff_size * 8.0 * number_pkts_prev / (double)diff_tsc * (double)hz / 1000000000.0;
@@ -243,8 +269,9 @@ int main(int argc, char* argv[]) {
     sprintf(filename, "./result/round_trip_%d.txt", max_completion_size);
     FILE* file1 = fopen(filename, "w");
     for (i = 0 ; i < 99 ; i++) {
+        qsort(table[i], 512, sizeof(int), comp);
         for (j = 0 ; j < 512 ; j++) {
-            fprintf(file1, "%d\n", table[i][j]);
+        fprintf(file1, "%d\n", table[i][j]);
         }
     }
     fclose(file1);

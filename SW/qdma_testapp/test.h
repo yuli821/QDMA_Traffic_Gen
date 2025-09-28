@@ -19,7 +19,7 @@
 #include <fcntl.h>
 #include <time.h>
 
-#include "/home/yuli9/qdma_ip_driver/QDMA/DPDK/drivers/net/qdma/rte_pmd_qdma.h"
+#include "/home/yuli9/dpdk_test-area/dpdk-stable/drivers/net/qdma/rte_pmd_qdma.h"
 #include "pcierw.h"
 #include "qdma_regs.h"
 
@@ -63,9 +63,9 @@
 // #define RSS_END 		0x2A4
 #define DATA_START      0xE8
 
-#define BURST_SIZE 1
+#define BURST_SIZE 128
 #define MBUF_SIZE 2048
-#define CHANGE_INDRECT_TABLE 0
+#define CHANGE_INDRECT_TABLE 1
 
 extern int num_ports;
 
@@ -89,6 +89,12 @@ typedef struct input_arg {
 } input_arg_t;
 
 extern struct port_info pinfo[QDMA_MAX_PORTS];
+
+int comp (const void * elem1, const void * elem2) {
+    int f = *((int*)elem1);
+    int s = *((int*)elem2);
+    return ((f>s) - (f<s));
+}
 
 int port_init(int portid, int num_queues, int st_queues, uint16_t nb_descs, int buff_size)
 {
@@ -180,7 +186,7 @@ int port_init(int portid, int num_queues, int st_queues, uint16_t nb_descs, int 
         if (diag < 0)
             rte_exit(EXIT_FAILURE, "Cannot setup port %d RX Queue 0 (err=%d)\n", portid, diag);
     }
-    rte_pmd_qdma_set_c2h_descriptor_prefetch(portid, 0, 1);
+    // rte_pmd_qdma_set_c2h_descriptor_prefetch(portid, 0, 1);
     // rte_pmd_qdma_set_cmpt_trigger_mode(portid, 0, RTE_PMD_QDMA_TRIG_MODE_EVERY);
 
     diag = rte_eth_dev_start(portid);
@@ -220,31 +226,31 @@ static int parse_args(int argc, char **argv) {
 
         switch (c) {
         case 'p':
-    		port = (uint16_t)strtol(optarg, endptr, 10);
+    		port = (uint32_t)strtol(optarg, endptr, 10);
             break;
 
         case 'q':
-			num_queues = (uint16_t)strtol(optarg, endptr, 10);
+			num_queues = (uint32_t)strtol(optarg, endptr, 10);
             break;
 
         case 'Q':
-			stqueues = (uint16_t)strtol(optarg, endptr, 10);
+			stqueues = (uint32_t)strtol(optarg, endptr, 10);
             break;
 
         case 's':
-			pktsize = (uint16_t)strtol(optarg, endptr, 10);
+			pktsize = (uint32_t)strtol(optarg, endptr, 10);
             break;
 
         case 'n':
-			numpkts = (uint16_t)strtol(optarg, endptr, 10);
+			numpkts = (uint32_t)strtol(optarg, endptr, 10);
             break;
 
         case 'c':
-			cycles = (uint16_t)strtol(optarg, endptr, 10);
+			cycles = (uint32_t)strtol(optarg, endptr, 10);
             break;
 
         case 'i':
-			interval = (uint16_t)strtol(optarg, endptr, 10);
+			interval = (uint32_t)strtol(optarg, endptr, 10);
             break;
 
         case 'h':

@@ -595,7 +595,7 @@ int qdma_dev_qinfo_get(uint32_t dma_device_index, uint16_t func_id,
 	dev_entry = qdma_get_dev_entry(dma_device_index, func_id);
 
 	if (!dev_entry) {
-		qdma_log_debug("%s: Dev Entry not created yet\n", __func__);
+		qdma_log_error("%s: Dev Entry not created yet\n", __func__);
 		return -QDMA_ERR_RM_DEV_NOT_EXISTS;
 	}
 

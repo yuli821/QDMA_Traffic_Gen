@@ -978,6 +978,7 @@ int qdma_device_open(const char *mod_name, struct qdma_dev_conf *conf,
 #ifndef __QDMA_VF__
 	int qbase = QDMA_QBASE;
 	int qmax = QDMA_TOTAL_Q;
+	int fair_share_qmax = 0;
 #endif
 
 	*dev_hndl = 0UL;
@@ -1093,6 +1094,7 @@ int qdma_device_open(const char *mod_name, struct qdma_dev_conf *conf,
 	/* get the device attributes */
 	qdma_device_attributes_get(xdev);
 	qmax = xdev->dev_cap.num_qs;
+	pr_err("qmax: %d", qmax);
 	if (pdev->bus->parent)
 		rv = qdma_master_resource_create(pdev->bus->number,
 				pci_bus_max_busnr(pdev->bus->parent), qbase,
@@ -1128,6 +1130,7 @@ int qdma_device_open(const char *mod_name, struct qdma_dev_conf *conf,
 				&xdev->conf.qsets_base,
 				&xdev->conf.qsets_max);
 	if (rv < 0) {
+		pr_err("Failed to get qinfo, err = %d", rv);
 		rv = qdma_dev_entry_create(xdev->dma_device_index,
 				xdev->func_id);
 		if (rv < 0) {
@@ -1135,6 +1138,12 @@ int qdma_device_open(const char *mod_name, struct qdma_dev_conf *conf,
 			rv = -ENODEV;
 			goto unmap_bars;
 		}
+		fair_share_qmax = xdev->dev_cap.num_qs / xdev->dev_cap.num_pfs;
+		xdev->conf.qsets_max = qmax;
+		xdev->conf.qsets_base = 0;
+
+		pr_info("%s: Auto-calculated qsets_max=%u (num_qs=%u / num_pfs=%u)\n",
+			xdev->conf.name, fair_share_qmax, xdev->dev_cap.num_qs, xdev->dev_cap.num_pfs);
 	}
 
 	rv = qdma_dev_update(xdev->dma_device_index, xdev->func_id,
