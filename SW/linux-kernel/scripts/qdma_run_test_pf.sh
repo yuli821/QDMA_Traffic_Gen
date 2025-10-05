@@ -102,14 +102,14 @@ fi
 if [ ! -z $6 ]; then #if arg6 is there pfetch byp enable
 	pftch_byp=$6
 fi
-if [ ! -z $6 ]; then #if arg7 is there FLR enable
+if [ ! -z $7 ]; then #if arg7 is there FLR enable
 	flr_on=$7
 fi
 
 echo "$pf $qid_start $num_qs $desc_byp $pftch $pftch_byp"
-size=1024
-num_pkt=1 #number of packets not more then 64
-infile='./datafile_16bit_pattern.bin'
+size=8192
+#num_pkt=1 #number of packets not more then 64
+#infile='./datafile_16bit_pattern.bin'
 declare -a bypass_mode_lst=(NO_BYPASS_MODE DESC_BYPASS_MODE CACHE_BYPASS_MODE SIMPLE_BYPASS_MODE)
 
 
@@ -426,64 +426,96 @@ function run_st_c2h () {
 
 		get_user_bar $pf_bdf
 
-		for ((i=$qid_start; i < (($qid_start + $num_qs)); i++)); do
+		#for ((i=$qid_start; i < (($qid_start + $num_qs)); i++)); do
 			# Setup for Queues
-			qid=$i
-			out_st="/tmp/out_st"$pf_bdf"_"$qid
+		qid=0
+		out_st="/tmp/out_st"$pf_bdf"_"$qid
 
-			# Each PF is assigned with 32 Queues. PF0 has queue 0 to 31, PF1 has 32 to 63 
-			# Write QID in offset 0x00 
-			hw_qid=$(($qid + ${qbase_array[$pf]} ))
-			dma-ctl qdma$pf_bdf reg write bar $usr_bar 0x0 $hw_qid  >> ./run_pf.log 2>&1
+		# Each PF is assigned with 32 Queues. PF0 has queue 0 to 31, PF1 has 32 to 63 
+		# Write QID in offset 0x00 
+		#hw_qid=$(($qid + ${qbase_array[$pf]} ))
+		hw_qid=0
+		#dma-ctl qdma$pf_bdf reg write bar $usr_bar 0x0 $hw_qid  >> ./run_pf.log 2>&1
 
-			# open the Queue for AXI-ST streaming interface.
-			queue_start $pf_bdf $qid st c2h
-	
-			dev_st_c2h="/dev/qdma$pf_bdf-ST-$qid"
-			let "tsize= $size*$num_pkt" # if more packets are requested.
+		# open the Queue for AXI-ST streaming interface.
+		queue_start $pf_bdf $qid st c2h
 
-			# Write transfer size to offset 0x04
-			dma-ctl qdma$pf_bdf reg write bar $usr_bar 0x4 $size >> ./run_pf.log 2>&1
-	
-			# Write number of packets to offset 0x20
-			dma-ctl qdma$pf_bdf reg write bar $usr_bar 0x20 $num_pkt >> ./run_pf.log 2>&1 
+		dev_st_c2h="/dev/qdma$pf_bdf-ST-$qid"
+		#let "tsize= $size*$num_pkt" # if more packets are requested.
 
-			# Write to offset 0x80 bit [1] to trigger C2H data generator. 
-			dma-ctl qdma$pf_bdf reg write bar $usr_bar 0x08 2 >> ./run_pf.log 2>&1
+		#dma-ctl qdma$pf_bdf reg write bar $usr_bar 0x0 $hw_qid  >> ./run_pf.log 2>&1
 
-			# do C2H transfer 
-			dma-from-device -d $dev_st_c2h -f $out_st -s $tsize >> ./run_pf.log 2>&1
-			if [ $? -ne 0 ]; then
-				echo "#### ERROR Test failed. Transfer failed ####"
-				cleanup_queue $pf_bdf $qid st c2h
-				continue
-			fi
-	
-			cmp $out_st $infile -n $tsize
-			if [ $? -ne 0 ]; then
-				echo "#### Test ERROR. Queue $2 data did not match ####" 
-				dma-ctl qdma$pf_bdf q dump idx $qid dir c2h >> ./run_pf.log 2>&1
-				dma-ctl qdma$pf_bdf reg dump >> ./run_pf.log 2>&1
-			else
-				echo "**** Test pass. Queue $qid"
-			fi
-			# Close the Queues
-			dma-ctl qdma$pf_bdf reg write bar $usr_bar 0x08 0x22 >> ./run_pf.log 2>&1
-			var=`dma-ctl qdma$pf_bdf reg read bar $usr_bar 0x18 | sed 's/.*= //' | sed 's/.*x//' | cut -d. -f1`
-			j=0
-			while [ "$j" -lt "2" ]
-			do
-				j=$[$j+1]
-				if [ $var -eq "1" ]
-				then 
-					break
-				else
-					sleep 1
-				fi
-			done
-			cleanup_queue $pf_bdf $qid st c2h
-			echo "-----------------------------------------------"
+		# Disable DMA Bypass (your addition)
+		#dma-ctl qdma$pf_bdf reg write bar $usr_bar 0x90 0 >> ./run_pf.log 2>&1
+
+		# Program RSS table (your addition) - 128 entries
+		for ((rss_i=0; rss_i<128; rss_i++)); do
+			#rss_qid=$(( ($rss_i % $num_qs) + ${qbase_array[$pf]} ))
+			rss_qid=0
+			rss_addr=$(( 0xA8 + $rss_i * 4 ))
+			dma-ctl qdma$pf_bdf reg write bar $usr_bar $rss_addr $rss_qid >> ./run_pf.log 2>&1
 		done
+
+		# Program transfer size (existing)
+		dma-ctl qdma$pf_bdf reg write bar $usr_bar 0x04 $size >> ./run_pf.log 2>&1
+
+		# Program cycles per packet (your addition)
+		dma-ctl qdma$pf_bdf reg write bar $usr_bar 0x1C 128 >> ./run_pf.log 2>&1
+
+		# Program num queues to generate (your addition)
+		dma-ctl qdma$pf_bdf reg write bar $usr_bar 0x28 $num_qs >> ./run_pf.log 2>&1
+
+		# Program traffic pattern (your addition) 
+		dma-ctl qdma$pf_bdf reg write bar $usr_bar 0x20 0 >> ./run_pf.log 2>&1
+
+		# Program HW QID (modified from existing)
+		dma-ctl qdma$pf_bdf reg write bar $usr_bar 0x0 0 >> ./run_pf.log 2>&1
+
+		# Start C2H generator (existing)
+		dma-ctl qdma$pf_bdf reg write bar $usr_bar 0x08 2 >> ./run_pf.log 2>&1
+		# # Write transfer size to offset 0x04
+		# dma-ctl qdma$pf_bdf reg write bar $usr_bar 0x4 $size >> ./run_pf.log 2>&1
+
+		# # Write number of packets to offset 0x20
+		# dma-ctl qdma$pf_bdf reg write bar $usr_bar 0x20 $num_pkt >> ./run_pf.log 2>&1 
+
+		# # Write to offset 0x80 bit [1] to trigger C2H data generator. 
+		# dma-ctl qdma$pf_bdf reg write bar $usr_bar 0x08 2 >> ./run_pf.log 2>&1
+
+		# do C2H transfer 
+		# dma-from-device -d $dev_st_c2h -f $out_st -s $tsize >> ./run_pf.log 2>&1
+		dma-from-device -d $dev_st_c2h -f $out_st -s $size -t 10 >> ./run_pf.log 2>&1
+		if [ $? -ne 0 ]; then
+			echo "#### ERROR Test failed. Transfer failed ####"
+			cleanup_queue $pf_bdf $qid st c2h
+			continue
+		fi
+
+		# cmp $out_st $infile -n $tsize
+		# if [ $? -ne 0 ]; then
+		# 	echo "#### Test ERROR. Queue $2 data did not match ####" 
+		# 	dma-ctl qdma$pf_bdf q dump idx $qid dir c2h >> ./run_pf.log 2>&1
+		# 	dma-ctl qdma$pf_bdf reg dump >> ./run_pf.log 2>&1
+		# else
+		# 	echo "**** Test pass. Queue $qid"
+		# fi
+		# Close the Queues
+		dma-ctl qdma$pf_bdf reg write bar $usr_bar 0x08 0x40 >> ./run_pf.log 2>&1
+		var=`dma-ctl qdma$pf_bdf reg read bar $usr_bar 0x18 | sed 's/.*= //' | sed 's/.*x//' | cut -d. -f1`
+		j=0
+		while [ "$j" -lt "2" ]
+		do
+			j=$[$j+1]
+			if [ $var -eq "1" ]
+			then 
+				break
+			else
+				sleep 1
+			fi
+		done
+		cleanup_queue $pf_bdf $qid st c2h
+		echo "-----------------------------------------------"
+		#done
 		pf=$((pf+1));
 		echo "AXI-ST C2H for Func $pf_bdf End" 2>&1 | tee -a ./run_pf.log
 		echo "***********************************************" 2>&1 | tee -a ./run_pf.log

@@ -35,6 +35,8 @@
 
 /* include early, to verify it depends only on the headers above */
 #include "version.h"
+//net driver
+#include "net/qdma_net.h"
 
 #define QDMA_DEFAULT_TOTAL_Q 2048
 
@@ -1627,6 +1629,8 @@ static int probe_one(struct pci_dev *pdev, const struct pci_device_id *id)
 		if (rv < 0)
 			goto close_device;
 	}
+	//net driver
+	qdma_net_register(pdev, xpdev);
 
 	dev_set_drvdata(&pdev->dev, xpdev);
 
@@ -1684,6 +1688,9 @@ static void remove_one(struct pci_dev *pdev)
 		sysfs_remove_group(&pdev->dev.kobj, &pci_device_attr_group);
 
 	qdma_cdev_device_cleanup(&xpdev->cdev_cb);
+
+	//net driver
+	qdma_net_unregister(xpdev);
 
 	xpdev_device_cleanup(xpdev);
 

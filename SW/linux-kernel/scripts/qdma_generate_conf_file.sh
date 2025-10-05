@@ -1,3 +1,7 @@
+#!/bin/bash
+#
+# Simple script to generate conf file for module params.
+# 
 #/*
 # * This file is part of the Xilinx DMA IP Core driver for Linux
 # *
@@ -16,12 +20,6 @@
 # * The full GNU General Public License is included in this distribution in
 # * the file called "COPYING".
 # */
-
-
-#!/bin/bash
-#
-# Simple script to generate conf file for module params.
-# 
 
 
 function print_help() {

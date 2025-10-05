@@ -19,7 +19,7 @@
 #include <fcntl.h>
 #include <time.h>
 
-#include "/home/yuli9/dpdk_test-area/dpdk-stable/drivers/net/qdma/rte_pmd_qdma.h"
+#include "/home/yuli9/dpdk_test_area/dpdk-stable/drivers/net/qdma/rte_pmd_qdma.h"
 #include "pcierw.h"
 #include "qdma_regs.h"
 

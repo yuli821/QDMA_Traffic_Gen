@@ -11,7 +11,7 @@
 # */
 
 name=st_sample
-pci_bus=02#pci_bus=d8
+pci_bus=99#pci_bus=d8
 pci_dev=00
 function=0#fun_id
 is_vf=0
@@ -26,6 +26,6 @@ pfetch_en=0
 rngidx=0
 pkt_sz=1024
 io_type=io_async
-cycles_per_pkt=1000#Add 
+cycles_per_pkt=100#Add 
 traffic_pattern=0#Add: 0-default
 num_cores=1#Add: num cores

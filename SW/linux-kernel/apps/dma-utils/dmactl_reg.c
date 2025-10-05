@@ -176,18 +176,19 @@ static int32_t reg_write_mmap(struct xnl_dev_info *dev_info,
 	char fname[256];
 	int rv = 0;
 	uint32_t attrs[XNL_ATTR_MAX] = {0};
-
+	//printf("dmactl_reg.c:179: reg_write_mmap\n");
 	get_syspath_bar_mmap(fname, dev_info->pci_bus, dev_info->pci_dev,
 			     dev_info->dev_func, barno);
-
+	//printf("dmactl_reg.c:182: get_syspath_bar_mmap\n");
 	bar = mmap_bar(fname, xcmd->req.reg.reg + 4, PROT_WRITE);
 	if (!bar) {
 		rv  = xnl_common_msg_send(xcmd, attrs);
-
+		//printf("dmactl_reg.c:186: xnl_common_msg_send\n");
 		return rv;
 	}
-
+	//printf("Here\n");
 	bar[xcmd->req.reg.reg / 4] = htole32(xcmd->req.reg.val);
+	//printf("Here2\n");
 	munmap(bar, xcmd->req.reg.reg + 4);
 	return 0;
 }
@@ -414,6 +415,7 @@ int proc_reg_cmd(struct xcmd_info *xcmd)
 			return rv;
 		break;
 	case XNL_CMD_REG_WRT:
+		//printf("dmactl_reg.c:418: reg_write_mmap\n");
 		v = reg_write_mmap(&xcmd->resp.dev_info, barno, xcmd);
 		if (v < 0)
 			return rv;

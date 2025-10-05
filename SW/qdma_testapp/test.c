@@ -228,13 +228,13 @@ int main(int argc, char* argv[]) {
     PciWrite(user_bar_idx, C2H_CONTROL_REG, reg_val,port);
 
     printf("DMA received number of packets: %ld\n",number_pkts_prev);
-    rte_spinlock_unlock(&pinfo[port].port_update_lock);
+    //rte_spinlock_unlock(&pinfo[port].port_update_lock);
 
     /*Write the recorded throughput to the target file*/
     char filename[100];
     sprintf(filename, "./result/result_%d_rx_only.txt", num_queues);
     FILE* file = fopen(filename, "a");
-    double average;
+    double average = 0.0;
     for (i = 0 ; i < 10 ; i++) {
         average += arr[i];
     }
