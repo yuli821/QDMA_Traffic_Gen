@@ -1630,7 +1630,11 @@ static int probe_one(struct pci_dev *pdev, const struct pci_device_id *id)
 			goto close_device;
 	}
 	//net driver
-	qdma_net_register(pdev, xpdev);
+	// rv = qdma_net_register(pdev, (struct xlnx_dma_dev *)xpdev->dev_hndl, xpdev);
+	// if (rv < 0) {
+	// 	pr_warn("Failed to register network device: %d\n", rv);
+	// 	// Don't fail probe, DMA functionality still works
+	// }
 
 	dev_set_drvdata(&pdev->dev, xpdev);
 
@@ -1690,7 +1694,7 @@ static void remove_one(struct pci_dev *pdev)
 	qdma_cdev_device_cleanup(&xpdev->cdev_cb);
 
 	//net driver
-	qdma_net_unregister(xpdev);
+	qdma_net_unregister((struct xlnx_dma_dev *)xpdev->dev_hndl);
 
 	xpdev_device_cleanup(xpdev);
 

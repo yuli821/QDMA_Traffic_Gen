@@ -16,15 +16,18 @@
 #define QDMA_NET_MAC_LO          0x08E8  // MAC address low 32 bits
 #define QDMA_NET_MAC_HI          0x08EC  // MAC address high 16 bits  
 #define QDMA_NET_LINK_STATUS     0x08F0  // Link status register
-#define QDMA_NET_CAPABILITIES    0x08F4  // Network capabilities
-#define QDMA_NET_FEATURES        0x08F8  // Hardware features
-#define QDMA_NET_STATS_BASE      0x0900  // Base for network statistics
+// #define QDMA_NET_CAPABILITIES    0x08F4  // Network capabilities
+// #define QDMA_NET_FEATURES        0x08F8  // Hardware features
+// #define QDMA_NET_STATS_BASE      0x0900  // Base for network statistics
+
+// Link status bits
+#define QDMA_NET_LINK_UP         BIT(0)
 
 struct qdma_net_hw_info {
     u8 mac[ETH_ALEN];
     u32 link_status;
-    u32 capabilities;
-    u32 features;
+    // u32 capabilities;
+    // u32 features;
 };
 
 struct qdma_net_queue {
@@ -40,18 +43,23 @@ struct qdma_net_priv {
 	struct net_device *ndev;
 	struct pci_dev *pdev;
 
-	/* libqdma device */
+	/* libqdma device - connection to DMA driver*/
 	struct xlnx_dma_dev *xdev;
+	struct xlnx_pci_dev *xpdev;  // For register access
 
 	u16 num_txq;
 	u16 num_rxq;
 	struct qdma_net_queue *qs;
 
+	/* Link monitoring */
+	struct delayed_work link_work;
+	bool link_up;
 	/* simple sw stats, expand later */
 	struct rtnl_link_stats64 stats;
 };
 
-int qdma_net_register(struct pci_dev *pdev, struct xlnx_dma_dev *xdev);
+int qdma_net_register(struct pci_dev *pdev, struct xlnx_dma_dev *xdev,
+	struct xlnx_pci_dev *xpdev);
 void qdma_net_unregister(struct xlnx_dma_dev *xdev);
 
 #endif /* ifndef __QDMA_NET_H__ */

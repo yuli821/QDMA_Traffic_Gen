@@ -5,20 +5,15 @@
 
 #include "qdma_net.h"
 
-/* module params for queue selection; reserve QID 0 by default */
-static ushort qdma_net_qbase = 0;
-module_param(qdma_net_qbase, ushort, 0644);
-MODULE_PARM_DESC(qdma_net_qbase, "Base QID for netdev queues");
-static ushort qdma_net_qcount = 1;
-module_param(qdma_net_qcount, ushort, 0644);
-MODULE_PARM_DESC(qdma_net_qcount, "Number of queue pairs for netdev");
-
+/* Forward declarations */
 static int qdma_net_ndo_open(struct net_device *ndev);
 static int qdma_net_ndo_stop(struct net_device *ndev);
-static netdev_tx_t qdma_net_ndo_start_xmit(struct sk_buff *skb, struct net_device *ndev);
-static int qdma_net_napi_poll(struct napi_struct *napi, int budget);
-static void qdma_net_ndo_get_stats64(struct net_device *ndev, struct rtnl_link_stats64 *s);
+static netdev_tx_t qdma_net_ndo_start_xmit(struct sk_buff *skb, 
+                                            struct net_device *ndev);
+static void qdma_net_ndo_get_stats64(struct net_device *ndev, 
+                                      struct rtnl_link_stats64 *s);
 
+/* Network device operations */
 static const struct net_device_ops qdma_netdev_ops = {
 	.ndo_open		= qdma_net_ndo_open,
 	.ndo_stop		= qdma_net_ndo_stop,
@@ -26,251 +21,255 @@ static const struct net_device_ops qdma_netdev_ops = {
 	.ndo_get_stats64	= qdma_net_ndo_get_stats64,
 };
 
-static void qdma_net_napi_schedule(void *q_hndl, void *uld)
-{
-	struct qdma_net_queue *q = (struct qdma_net_queue *)uld;
-
-	if (likely(q))
-		napi_schedule(&q->napi);
-}
-
-/* Minimal ethtool (stub for now) */
-static const struct ethtool_ops qdma_net_ethtool_ops = {
-	/* fill in later */
-};
-
-static int qdma_net_setup_one_queue(struct qdma_net_priv *priv, struct qdma_net_queue *q)
-{
-	struct qdma_queue_conf qconf;
-	int rv;
-
-	memset(&qconf, 0, sizeof(qconf));
-
-	/* TX: ST H2C */
-	qconf.st = 1;
-	qconf.q_type = Q_H2C;
-	qconf.qidx = qdma_net_qbase + q->qid;
-	qconf.desc_rng_sz_idx = 3;		/* ring size index: moderate */
-	qconf.pidx_acc = 8;			/* accumulate pidx updates */
-
-	rv = qdma_queue_add((unsigned long)priv->xdev, &qconf, &q->h2c_qhndl, NULL, 0);
-	if (rv < 0)
-		return rv;
-	rv = qdma_queue_config((unsigned long)priv->xdev, q->h2c_qhndl, &qconf, NULL, 0);
-	if (rv < 0)
-		return rv;
-
-	/* RX: ST C2H */
-	memset(&qconf, 0, sizeof(qconf));
-	qconf.st = 1;
-	qconf.q_type = Q_C2H;
-	qconf.qidx = qdma_net_qbase + q->qid;
-	qconf.desc_rng_sz_idx = 3;
-	qconf.c2h_buf_sz_idx = 0;		/* default buffer size index */
-	qconf.cmpl_en_intr = 1;
-	qconf.cmpl_trig_mode = 1;		/* timer */
-	qconf.cmpl_timer_idx = 3;
-	qconf.cmpl_cnt_th_idx = 3;
-	qconf.cmpl_desc_sz = 3;			/* 8 << 3 = 64B */
-	qconf.adaptive_rx = 0;
-	qconf.fp_descq_isr_top = qdma_net_napi_schedule;
-	qconf.quld = q;
-
-	rv = qdma_queue_add((unsigned long)priv->xdev, &qconf, &q->c2h_qhndl, NULL, 0);
-	if (rv < 0)
-		return rv;
-	rv = qdma_queue_config((unsigned long)priv->xdev, q->c2h_qhndl, &qconf, NULL, 0);
-	if (rv < 0)
-		return rv;
-
-	/* RX CMPT */
-	memset(&qconf, 0, sizeof(qconf));
-	qconf.st = 0;
-	qconf.q_type = Q_CMPT;
-	qconf.qidx = qdma_net_qbase + q->qid;
-	qconf.cmpl_en_intr = 1;
-	qconf.cmpl_trig_mode = 1;
-	qconf.cmpl_timer_idx = 3;
-	qconf.cmpl_cnt_th_idx = 3;
-	qconf.cmpl_desc_sz = 3;
-
-	rv = qdma_queue_add((unsigned long)priv->xdev, &qconf, &q->cmpt_qhndl, NULL, 0);
-	if (rv < 0)
-		return rv;
-	rv = qdma_queue_config((unsigned long)priv->xdev, q->cmpt_qhndl, &qconf, NULL, 0);
-	if (rv < 0)
-		return rv;
-
-	/* Start in order: CMPT -> C2H -> H2C */
-	rv = qdma_queue_start((unsigned long)priv->xdev, q->cmpt_qhndl, NULL, 0);
-	if (rv < 0)
-		return rv;
-	rv = qdma_queue_start((unsigned long)priv->xdev, q->c2h_qhndl, NULL, 0);
-	if (rv < 0)
-		return rv;
-	rv = qdma_queue_start((unsigned long)priv->xdev, q->h2c_qhndl, NULL, 0);
-	if (rv < 0)
-		return rv;
-
-	return 0;
-}
-
-static int qdma_net_ndo_open(struct net_device *ndev)
-{
-	struct qdma_net_priv *priv = netdev_priv(ndev);
-	int rv;
-
-	netif_carrier_off(ndev);
-
-	/* Start one queue for now */
-	rv = qdma_net_setup_one_queue(priv, &priv->qs[0]);
-	if (rv < 0)
-		return rv;
-
-	napi_enable(&priv->qs[0].napi);
-	netif_tx_start_all_queues(ndev);
-	netif_carrier_on(ndev);
-
-	return 0;
-}
-
-static int qdma_net_ndo_stop(struct net_device *ndev)
-{
-	struct qdma_net_priv *priv = netdev_priv(ndev);
-
-	netif_tx_stop_all_queues(ndev);
-	napi_disable(&priv->qs[0].napi);
-
-	/* Stop queues */
-	qdma_queue_stop((unsigned long)priv->xdev, priv->qs[0].h2c_qhndl, NULL, 0);
-	qdma_queue_stop((unsigned long)priv->xdev, priv->qs[0].c2h_qhndl, NULL, 0);
-	qdma_queue_stop((unsigned long)priv->xdev, priv->qs[0].cmpt_qhndl, NULL, 0);
-
-	/* Remove queues */
-	qdma_queue_remove((unsigned long)priv->xdev, priv->qs[0].h2c_qhndl, NULL, 0);
-	qdma_queue_remove((unsigned long)priv->xdev, priv->qs[0].c2h_qhndl, NULL, 0);
-	qdma_queue_remove((unsigned long)priv->xdev, priv->qs[0].cmpt_qhndl, NULL, 0);
-
-	return 0;
-}
-
-static netdev_tx_t qdma_net_ndo_start_xmit(struct sk_buff *skb, struct net_device *ndev)
-{
-	extern int qdma_net_tx_enqueue_skb(struct qdma_net_priv *priv, struct qdma_net_queue *q, struct sk_buff *skb);
-	struct qdma_net_priv *priv = netdev_priv(ndev);
-	int rv;
-
-	rv = qdma_net_tx_enqueue_skb(priv, &priv->qs[0], skb);
-	if (rv < 0) {
-		netif_stop_subqueue(ndev, 0);
-		return NETDEV_TX_BUSY;
-	}
-
-	return NETDEV_TX_OK;
-}
-
-static int qdma_net_napi_poll(struct napi_struct *napi, int budget)
-{
-	struct qdma_net_queue *q = container_of(napi, struct qdma_net_queue, napi);
-	struct qdma_net_priv *priv = netdev_priv(q->napi.dev);
-	int work = 0;
-
-	/* Service RX completions; Stage 1: no RX delivery yet, just rearm path */
-	work = qdma_queue_service((unsigned long)priv->xdev, q->c2h_qhndl, budget, true);
-	if (work < budget) {
-		napi_complete_done(napi, work);
-	}
-
-	return work;
-}
-
-// Add to qdma_net.c
-static int qdma_net_read_hw_info(struct xlnx_pci_dev *xpdev, struct qdma_net_hw_info *info)
+/* Read hardware info using DMA driver functions */
+static int qdma_net_read_hw_info(struct xlnx_pci_dev *xpdev, 
+                                   struct qdma_net_hw_info *info)
 {
     u32 val;
     int rv;
 
     memset(info, 0, sizeof(*info));
 
-    // Read MAC address from user BAR
+    /* Read MAC address - USE DMA DRIVER FUNCTION */
     rv = qdma_device_read_user_register(xpdev, QDMA_NET_MAC_LO, &val);
-    if (rv < 0) return rv;
+    if (rv < 0) {
+        pr_err("Failed to read MAC_LO: %d\n", rv);
+        return rv;
+    }
     info->mac[2] = (val >> 24) & 0xFF;
     info->mac[3] = (val >> 16) & 0xFF;
     info->mac[4] = (val >> 8) & 0xFF;
     info->mac[5] = (val >> 0) & 0xFF;
 
     rv = qdma_device_read_user_register(xpdev, QDMA_NET_MAC_HI, &val);
-    if (rv < 0) return rv;
+    if (rv < 0) {
+        pr_err("Failed to read MAC_HI: %d\n", rv);
+        return rv;
+    }
     info->mac[0] = (val >> 8) & 0xFF;
     info->mac[1] = (val >> 0) & 0xFF;
 
-    // Read link status
-    rv = qdma_device_read_user_register(xpdev, QDMA_NET_LINK_STATUS, &info->link_status);
-    if (rv < 0) return rv;
+    /* Read link status - USE DMA DRIVER FUNCTION */
+    rv = qdma_device_read_user_register(xpdev, QDMA_NET_LINK_STATUS, 
+                                         &info->link_status);
+    if (rv < 0) {
+        pr_err("Failed to read link status: %d\n", rv);
+        return rv;
+    }
 
-    // Read capabilities
-    rv = qdma_device_read_user_register(xpdev, QDMA_NET_CAPABILITIES, &info->capabilities);
-    if (rv < 0) return rv;
+    pr_info("Read MAC: %pM, Link: 0x%x\n", info->mac, info->link_status);
+    return 0;
+}
 
-    // Read features
-    rv = qdma_device_read_user_register(xpdev, QDMA_NET_FEATURES, &info->features);
-    if (rv < 0) return rv;
+/* Link monitoring work */
+static void qdma_net_link_work(struct work_struct *work)
+{
+    struct qdma_net_priv *priv = container_of(to_delayed_work(work),
+                                               struct qdma_net_priv,
+                                               link_work);
+    u32 link_status;
+    int rv;
+    bool link_up;
+
+    /* Read link status using DMA driver function */
+    rv = qdma_device_read_user_register(priv->xpdev, QDMA_NET_LINK_STATUS,
+                                         &link_status);
+    if (rv < 0) {
+        pr_err_ratelimited("Failed to read link status: %d\n", rv);
+        goto reschedule;
+    }
+
+    link_up = !!(link_status & QDMA_NET_LINK_UP);
+
+    if (link_up != priv->link_up) {
+        priv->link_up = link_up;
+        if (link_up) {
+            netif_carrier_on(priv->ndev);
+            netdev_info(priv->ndev, "Link is Up\n");
+        } else {
+            netif_carrier_off(priv->ndev);
+            netdev_info(priv->ndev, "Link is Down\n");
+        }
+    }
+
+reschedule:
+    /* Check link every 2 seconds */
+    schedule_delayed_work(&priv->link_work, 2 * HZ);
+}
+
+/* Minimal ethtool support */
+static void qdma_net_get_drvinfo(struct net_device *ndev,
+                                  struct ethtool_drvinfo *info)
+{
+    struct qdma_net_priv *priv = netdev_priv(ndev);
+    
+    strlcpy(info->driver, "qdma_net", sizeof(info->driver));
+    strlcpy(info->version, "1.0", sizeof(info->version));
+    strlcpy(info->bus_info, pci_name(priv->pdev), sizeof(info->bus_info));
+}
+
+static u32 qdma_net_get_link(struct net_device *ndev)
+{
+    struct qdma_net_priv *priv = netdev_priv(ndev);
+    return priv->link_up ? 1 : 0;
+}
+
+static const struct ethtool_ops qdma_net_ethtool_ops = {
+    .get_drvinfo    = qdma_net_get_drvinfo,
+    .get_link       = qdma_net_get_link,
+};
+
+/* Network device operations - stubs for now */
+static int qdma_net_ndo_open(struct net_device *ndev)
+{
+    struct qdma_net_priv *priv = netdev_priv(ndev);
+
+    netdev_info(ndev, "Opening network device (queues not started yet)\n");
+    
+    /* Start link monitoring */
+    schedule_delayed_work(&priv->link_work, HZ);
+    
+    /* For now, just mark TX queues as ready */
+    netif_tx_start_all_queues(ndev);
+    
+    return 0;
+}
+
+static int qdma_net_ndo_stop(struct net_device *ndev)
+{
+    struct qdma_net_priv *priv = netdev_priv(ndev);
+
+    netdev_info(ndev, "Stopping network device\n");
+    
+    /* Stop link monitoring */
+    cancel_delayed_work_sync(&priv->link_work);
+    
+    netif_tx_stop_all_queues(ndev);
+    netif_carrier_off(ndev);
+    
+    return 0;
+}
+
+static netdev_tx_t qdma_net_ndo_start_xmit(struct sk_buff *skb, 
+                                            struct net_device *ndev)
+{
+    struct qdma_net_priv *priv = netdev_priv(ndev);
+    
+    /* For now, just drop packets and count them */
+    priv->stats.tx_dropped++;
+    dev_kfree_skb_any(skb);
+    
+    return NETDEV_TX_OK;
+}
+
+static void qdma_net_ndo_get_stats64(struct net_device *ndev, 
+                                      struct rtnl_link_stats64 *s)
+{
+    struct qdma_net_priv *priv = netdev_priv(ndev);
+    *s = priv->stats;
+}
+
+/* Registration function - called from DMA driver probe */
+int qdma_net_register(struct pci_dev *pdev, struct xlnx_dma_dev *xdev,
+                       struct xlnx_pci_dev *xpdev)
+{
+    struct net_device *ndev;
+    struct qdma_net_priv *priv;
+    struct qdma_net_hw_info hw_info;
+    int rv;
+
+    pr_info("Registering QDMA network device\n");
+
+    /* Allocate network device */
+    ndev = alloc_etherdev_mq(sizeof(*priv), QDMA_NET_TXQ_CNT);
+    if (!ndev) {
+        pr_err("Failed to allocate netdev\n");
+        return -ENOMEM;
+    }
+
+    SET_NETDEV_DEV(ndev, &pdev->dev);
+    priv = netdev_priv(ndev);
+    priv->ndev = ndev;
+    priv->pdev = pdev;
+    priv->xdev = xdev;
+    priv->xpdev = xpdev;  // Store for register access
+    priv->num_txq = QDMA_NET_TXQ_CNT;
+    priv->num_rxq = QDMA_NET_RXQ_CNT;
+
+    /* Read hardware info using DMA driver functions */
+    rv = qdma_net_read_hw_info(xpdev, &hw_info);
+    if (rv < 0) {
+        pr_warn("Failed to read HW MAC, using random MAC\n");
+        eth_hw_addr_random(ndev);
+    } else {
+        /* Check if MAC is valid */
+        if (is_valid_ether_addr(hw_info.mac)) {
+            eth_hw_addr_set(ndev, hw_info.mac);
+            pr_info("Using hardware MAC address: %pM\n", hw_info.mac);
+        } else {
+            pr_warn("Invalid hardware MAC (all zeros?), using random\n");
+            eth_hw_addr_random(ndev);
+        }
+        
+        /* Set initial link state */
+        priv->link_up = !!(hw_info.link_status & QDMA_NET_LINK_UP);
+    }
+
+    /* Set up network device */
+    ndev->netdev_ops = &qdma_netdev_ops;
+    ndev->ethtool_ops = &qdma_net_ethtool_ops;
+
+    /* Minimal features for now */
+    ndev->features = NETIF_F_SG;  // Scatter-gather
+    ndev->hw_features = ndev->features;
+    
+    /* Set MTU limits */
+    ndev->min_mtu = ETH_MIN_MTU;
+    ndev->max_mtu = ETH_DATA_LEN;  // Standard 1500 for now
+
+    /* Initialize link work */
+    INIT_DELAYED_WORK(&priv->link_work, qdma_net_link_work);
+
+    /* Set TX queue configuration */
+    netif_set_real_num_tx_queues(ndev, QDMA_NET_TXQ_CNT);
+    netif_set_real_num_rx_queues(ndev, QDMA_NET_RXQ_CNT);
+
+    /* Start with carrier off */
+    netif_carrier_off(ndev);
+
+    /* Register network device */
+    rv = register_netdev(ndev);
+    if (rv < 0) {
+        pr_err("Failed to register netdev: %d\n", rv);
+        free_netdev(ndev);
+        return rv;
+    }
+
+    netdev_info(ndev, "QDMA network device registered successfully\n");
+    netdev_info(ndev, "MAC Address: %pM\n", ndev->dev_addr);
+    
+    /* Store netdev in xdev for cleanup */
+    dev_set_drvdata(&pdev->dev, ndev);
 
     return 0;
 }
 
-static void qdma_net_ndo_get_stats64(struct net_device *ndev, struct rtnl_link_stats64 *s)
-{
-	struct qdma_net_priv *priv = netdev_priv(ndev);
-
-	*s = priv->stats;
-}
-
-int qdma_net_register(struct pci_dev *pdev, struct xlnx_dma_dev *xdev)
-{
-	struct net_device *ndev;
-	struct qdma_net_priv *priv;
-
-	ndev = alloc_etherdev_mq(sizeof(*priv), QDMA_NET_TXQ_CNT);
-	if (!ndev)
-		return -ENOMEM;
-
-	SET_NETDEV_DEV(ndev, &pdev->dev);
-	priv = netdev_priv(ndev);
-	priv->ndev = ndev;
-	priv->pdev = pdev;
-	priv->xdev = xdev;
-
-	priv->num_txq = QDMA_NET_TXQ_CNT;
-	priv->num_rxq = QDMA_NET_RXQ_CNT;
-
-	priv->qs = devm_kcalloc(&pdev->dev, 1, sizeof(*priv->qs), GFP_KERNEL);
-	if (!priv->qs) {
-		free_netdev(ndev);
-		return -ENOMEM;
-	}
-	priv->qs[0].qid = 0;
-	netif_napi_add(ndev, &priv->qs[0].napi, qdma_net_napi_poll, 64);
-
-	ndev->netdev_ops = &qdma_netdev_ops;
-	ndev->ethtool_ops = &qdma_net_ethtool_ops;
-
-	/* basic features for now; expand later */
-	ndev->features = 0;
-	ndev->hw_features = 0;
-	//eth_hw_addr_random(ndev);
-
-	netif_set_real_num_tx_queues(ndev, QDMA_NET_TXQ_CNT);
-	netif_set_real_num_rx_queues(ndev, QDMA_NET_RXQ_CNT);
-
-	return register_netdev(ndev);
-}
-
 void qdma_net_unregister(struct xlnx_dma_dev *xdev)
 {
-	/* locate the net_device associated with xdev */
-	/* For Stage 1, we keep a single device; fetch via pci_get_drvdata */
-	/* Better: track ndev pointer from xpdev and pass it here */
-	/* Stub for now: no-op if not tracked */
+    struct pci_dev *pdev = xdev->conf.pdev;
+    struct net_device *ndev = dev_get_drvdata(&pdev->dev);
+    struct qdma_net_priv *priv;
+
+    if (!ndev)
+        return;
+
+    priv = netdev_priv(ndev);
+    
+    /* Cancel any pending work */
+    cancel_delayed_work_sync(&priv->link_work);
+    
+    unregister_netdev(ndev);
+    free_netdev(ndev);
+    
+    pr_info("QDMA network device unregistered\n");
 }
