@@ -12,6 +12,21 @@
 #define QDMA_NET_TXQ_CNT	1
 #define QDMA_NET_RXQ_CNT	1
 
+// Network-specific registers in user BAR
+#define QDMA_NET_MAC_LO          0x08E8  // MAC address low 32 bits
+#define QDMA_NET_MAC_HI          0x08EC  // MAC address high 16 bits  
+#define QDMA_NET_LINK_STATUS     0x08F0  // Link status register
+#define QDMA_NET_CAPABILITIES    0x08F4  // Network capabilities
+#define QDMA_NET_FEATURES        0x08F8  // Hardware features
+#define QDMA_NET_STATS_BASE      0x0900  // Base for network statistics
+
+struct qdma_net_hw_info {
+    u8 mac[ETH_ALEN];
+    u32 link_status;
+    u32 capabilities;
+    u32 features;
+};
+
 struct qdma_net_queue {
 	unsigned long h2c_qhndl;	/* TX queue handle */
 	unsigned long c2h_qhndl;	/* RX queue handle */

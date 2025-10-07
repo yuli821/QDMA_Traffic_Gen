@@ -184,6 +184,42 @@ static int qdma_net_napi_poll(struct napi_struct *napi, int budget)
 	return work;
 }
 
+// Add to qdma_net.c
+static int qdma_net_read_hw_info(struct xlnx_pci_dev *xpdev, struct qdma_net_hw_info *info)
+{
+    u32 val;
+    int rv;
+
+    memset(info, 0, sizeof(*info));
+
+    // Read MAC address from user BAR
+    rv = qdma_device_read_user_register(xpdev, QDMA_NET_MAC_LO, &val);
+    if (rv < 0) return rv;
+    info->mac[2] = (val >> 24) & 0xFF;
+    info->mac[3] = (val >> 16) & 0xFF;
+    info->mac[4] = (val >> 8) & 0xFF;
+    info->mac[5] = (val >> 0) & 0xFF;
+
+    rv = qdma_device_read_user_register(xpdev, QDMA_NET_MAC_HI, &val);
+    if (rv < 0) return rv;
+    info->mac[0] = (val >> 8) & 0xFF;
+    info->mac[1] = (val >> 0) & 0xFF;
+
+    // Read link status
+    rv = qdma_device_read_user_register(xpdev, QDMA_NET_LINK_STATUS, &info->link_status);
+    if (rv < 0) return rv;
+
+    // Read capabilities
+    rv = qdma_device_read_user_register(xpdev, QDMA_NET_CAPABILITIES, &info->capabilities);
+    if (rv < 0) return rv;
+
+    // Read features
+    rv = qdma_device_read_user_register(xpdev, QDMA_NET_FEATURES, &info->features);
+    if (rv < 0) return rv;
+
+    return 0;
+}
+
 static void qdma_net_ndo_get_stats64(struct net_device *ndev, struct rtnl_link_stats64 *s)
 {
 	struct qdma_net_priv *priv = netdev_priv(ndev);
