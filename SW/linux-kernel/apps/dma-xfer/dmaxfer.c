@@ -1415,7 +1415,7 @@
 
 //     // Clean up buffer
 //     free(allocated);
-// 	return ret;
+	// 	return ret;
 // 	// for (i = 0; i < count; i++) {
 // 	// 	if (q_info[i].dir == DMAXFER_IO_WRITE) {
 // 	// 		/* Transfer DATA from inputfile to Device */
@@ -1829,7 +1829,7 @@ static void *dma_memalloc(struct mempool_handle *mpool, unsigned int num_blks)
             _mempool_info[tmp_blkidx].num_blks = num_blks;
             mpool->mempool_blkidx = i + 1;
             memptr = (char *)mpool->mempool + (tmp_blkidx * mpool->mempool_blksz);
-            break;
+				break;
         }
     }
     return memptr;
@@ -1941,7 +1941,7 @@ static int write_user_register(unsigned int pci_bus, unsigned int pci_dev,
     bar[reg / 4] = htole32(value);
     munmap(bar, reg + 4);
     
-    return 0;
+	return 0;
 }
 
 /* Queue management via netlink (from dmactl.c and cmd_parse.c) */
@@ -2043,8 +2043,8 @@ static void *completion_thread(void *arg)
     events = calloc(MAX_AIO_EVENTS, sizeof(struct io_event));
     if (!events) {
         fprintf(stderr, "Q%u completion: OOM for events\n", qinfo->qid);
-        return NULL;
-    }
+		return NULL;
+	}
     
     printf("Q%u: Completion thread started\n", qinfo->qid);
     
@@ -2116,7 +2116,7 @@ static void *submit_thread(void *arg)
     unsigned int burst_cnt = 1;  // Only 1 iovec for ST C2H
     unsigned int num_desc = (io_sz + DEFAULT_PAGE_SIZE - 1) >> PAGE_SHIFT;
     unsigned int cnt;
-    int ret;
+	int ret;
     struct iocb *io_list[1];
     
     // Create memory pools (matching dmaperf.c lines 1877-1879)
@@ -2201,8 +2201,8 @@ static void *submit_thread(void *arg)
                     dma_free(&qinfo->datahandle, iov[iovcnt - 1].iov_base);
                 dma_free(&qinfo->iocbhandle, io_list[0]);
                 node->max_events = cnt;
-                break;
-            }
+			break;
+		}
             
             qinfo->num_req_submitted++;
             cnt++;
@@ -2279,7 +2279,7 @@ int main(int argc, char *argv[])
         }
         
         ret = queue_start(bdf, qid, is_vf);
-        if (ret < 0) {
+	if (ret < 0) {
             printf("ERROR: queue_start failed for Q%u: %d\n", qid, ret);
             goto cleanup;
         }
@@ -2327,7 +2327,7 @@ int main(int argc, char *argv[])
     // Step 5: Start C2H generator
     printf("Step 5: Starting C2H generator...\n");
     ret = write_user_register(pci_bus, pci_dev, pf, 0x08, 0x2);
-    if (ret < 0) {
+	if (ret < 0) {
         printf("ERROR: Failed to start generator\n");
         goto cleanup;
     }
