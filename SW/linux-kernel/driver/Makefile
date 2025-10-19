@@ -162,6 +162,7 @@ else
 endif
 CFLAGS += -I$(srcdir)/src/libqdma/qdma_access
 CFLAGS += -I$(srcdir)/src/libqdma
+CFLAGS += -I$(srcdir)/s../net
 export FLAGS += $(CFLAGS)
 #export FLAGS += $(CFLAGS) $(EXTRA_CFLAGS) $(CPPFLAGS)
 export verbose

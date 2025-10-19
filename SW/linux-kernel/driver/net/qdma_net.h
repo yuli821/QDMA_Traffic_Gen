@@ -6,8 +6,8 @@
 #include <linux/dma-mapping.h>
 #include <linux/etherdevice.h>
 
-#include "libqdma/libqdma_export.h"
-#include "libqdma/qdma_ul_ext.h"
+#include "../libqdma/libqdma_export.h"
+#include "../libqdma/qdma_ul_ext.h"
 
 #define QDMA_NET_TXQ_CNT	1
 #define QDMA_NET_RXQ_CNT	1
@@ -37,6 +37,7 @@ struct qdma_net_queue {
 
 	struct napi_struct napi;
 	u16 qid;
+	struct qdma_net_priv *priv;
 };
 
 struct qdma_net_priv {
@@ -58,8 +59,17 @@ struct qdma_net_priv {
 	struct rtnl_link_stats64 stats;
 };
 
-int qdma_net_register(struct pci_dev *pdev, struct xlnx_dma_dev *xdev,
-	struct xlnx_pci_dev *xpdev);
-void qdma_net_unregister(struct xlnx_dma_dev *xdev);
+int qdma_net_register(struct pci_dev *pdev, struct xlnx_dma_dev *xdev, struct xlnx_pci_dev *xpdev);
+void qdma_net_unregister(struct xlnx_pci_dev *xpdev);
+
+/* RX callback for QDMA */
+int qdma_net_rx_packet_cb(unsigned long qhndl, unsigned long quld,
+	unsigned int len, unsigned int sgcnt,
+	struct qdma_sw_sg *sgl, void *udd);
+
+/* TX function */
+int qdma_net_tx_enqueue_skb(struct qdma_net_priv *priv, 
+	struct qdma_net_queue *q, 
+	struct sk_buff *skb);
 
 #endif /* ifndef __QDMA_NET_H__ */

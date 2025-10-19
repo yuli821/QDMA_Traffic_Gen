@@ -107,7 +107,7 @@ if [ ! -z $7 ]; then #if arg7 is there FLR enable
 fi
 
 echo "$pf $qid_start $num_qs $desc_byp $pftch $pftch_byp"
-size=8192
+size=512
 #num_pkt=1 #number of packets not more then 64
 #infile='./datafile_16bit_pattern.bin'
 declare -a bypass_mode_lst=(NO_BYPASS_MODE DESC_BYPASS_MODE CACHE_BYPASS_MODE SIMPLE_BYPASS_MODE)
@@ -460,7 +460,7 @@ function run_st_c2h () {
 		dma-ctl qdma$pf_bdf reg write bar $usr_bar 0x04 $size >> ./run_pf.log 2>&1
 
 		# Program cycles per packet (your addition)
-		dma-ctl qdma$pf_bdf reg write bar $usr_bar 0x1C 128 >> ./run_pf.log 2>&1
+		dma-ctl qdma$pf_bdf reg write bar $usr_bar 0x1C 0 >> ./run_pf.log 2>&1
 
 		# Program num queues to generate (your addition)
 		dma-ctl qdma$pf_bdf reg write bar $usr_bar 0x28 $num_qs >> ./run_pf.log 2>&1
