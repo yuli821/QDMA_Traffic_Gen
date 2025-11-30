@@ -108,7 +108,6 @@ reg [15:0] 	       bp_lfsr;
 wire 	       bp_lfsr_net;
 wire 	       loopback_st;
 wire 	       back_pres;
-logic is_header;
 // wire [5:0] 	       emt_eop = h2c_tuser_mty[5:0];
 // wire [5:0] 	       emt_sop = 6'b0;
 wire  	       zero_byte = h2c_tuser_zero_byte;
@@ -190,16 +189,13 @@ end
 always @(posedge axi_aclk) begin 
   if (~axi_aresetn || perform_begin) begin 
     idx <= 0;
-    is_header <= 1'b1;
     for (integer j = 0 ; j < 512 ; j++) dat[j] <= #TCQ 0;
   end
   else if (h2c_tvalid && h2c_tready) begin //first beat, header field
-    if (is_header) begin
+    if (h2c_tdata[47:32] == 16'h1234) begin
       dat[idx] <= (timestamp > h2c_tdata[79:48]) ? timestamp - h2c_tdata[79:48] : ~h2c_tdata[79:48]  + 1 + timestamp;
       idx <= idx+1;
-      if (h2c_tlast) is_header <= 1'b1;
-      else           is_header <= 1'b0;
-    end else if (h2c_tlast) is_header <= 1'b1;
+    end
   end
 end
 

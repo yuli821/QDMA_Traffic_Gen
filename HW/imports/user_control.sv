@@ -56,7 +56,6 @@
 
 module user_control 
   #(
-   parameter MAX_ETH_FRAME = 16'h1000,
     parameter C_DATA_WIDTH = 64,
     parameter QID_MAX = 64,
     parameter TM_DSC_BITS = 16,
@@ -103,7 +102,6 @@ module user_control
     input axi_st_c2h_ready,
    //  input [10:0] c2h_qid,
     output reg [31:0] c2h_control,
-    output reg [31:0] c2h_num_pkt,
     output reg [10:0] c2h_st_qid,
     output clr_h2c_match,
     output reg [15:0] c2h_st_len,
@@ -115,10 +113,6 @@ module user_control
     input c2h_st_marker_rsp,
     output reg [31:0] cmpt_size,
     output reg [255:0] wb_dat,
-    output reg [TM_DSC_BITS-1:0] credit_out,
-    output reg       credit_updt,
-    output reg [31:0] credit_needed,
-    output reg [TM_DSC_BITS-1:0] credit_perpkt_in,
     output wire [15:0] buf_count,
     output wire h2c_dsc_bypass,
     output wire [1:0] c2h_dsc_bypass,
@@ -150,28 +144,23 @@ module user_control
     output [1:0]  c2h_st_at,
     output [6:0]  pfch_byp_tag,
     output [10:0] pfch_byp_tag_qid,
-   //  input         tm_dsc_sts_vld,
-   //  input         tm_dsc_sts_byp,
-   //  input         tm_dsc_sts_qen,
-   //  input         tm_dsc_sts_dir,
-   //  input         tm_dsc_sts_mm,
-   //  input         tm_dsc_sts_error,
-   //  input [10:0]  tm_dsc_sts_qid,
-   //  input [15:0]  tm_dsc_sts_avl,
-   //  input         tm_dsc_sts_qinv,
-   //  input 	  tm_dsc_sts_irq_arm,
-   //  output        tm_dsc_sts_rdy,
     output reg [31:0]  single_bit_err_inject_reg,
     output reg [31:0]  double_bit_err_inject_reg,
 
     output reg [31:0] cycles_per_pkt,
-    output reg [10:0] c2h_num_queue,
+    output reg [31:0] traffic_pattern,
+    output reg [31:0] src_ip,
+    output reg [31:0] dst_ip,
+    output reg [15:0] src_port,
+    output reg [15:0] dst_port,
+    output reg [7:0] protocol,
 
     output [10:0] c2h_qid,
     input [31:0] hash_val,
     output reg c2h_perform,
     output [31:0] read_addr,
-    input [31:0] rd_output
+    input [31:0] rd_output,
+    output reg [10:0] c2h_num_queue
     );
 
    reg [31:0] 	       control_reg_h2c;
@@ -191,9 +180,6 @@ module user_control
    wire         end_c2h;
    reg          end_c2h_d1;
    wire         end_c2h_pls;
-   wire         c2h_perf_enable;
-   reg          c2h_perf_enable_d1;
-   wire         c2h_perf_enable_pls;
    reg [63:0] 	       data_count;
    reg [63:0] 	       valid_count;
    reg [15:0] 	       c2h_st_buffsz;
@@ -225,7 +211,13 @@ module user_control
    assign hash_idx = hash_val[3:0];
    // reg [31:0] c2h_num_queue;
    reg [31:0] rss_indir_table [0:15];
+   wire [31:0] qdma_net_mac_hi;
+   wire [31:0] qdma_net_mac_lo;
+   wire [31:0] link_status_reg;
    assign c2h_qid = rss_indir_table[hash_idx];
+   assign qdma_net_mac_lo[31:0] = 32'h12345678; //8E8
+   assign qdma_net_mac_hi[31:0] = 32'h00000011; //8EC
+   assign link_status_reg = 32'h00000001; //8F0
    // Interpreting request on the axilite master interface
    wire [31:0] wr_addr;
    wire [31:0] rd_addr;
@@ -321,9 +313,7 @@ module user_control
          cycles_per_pkt <= 32'h0;
          wb_dat[255:0] <= 0;
          cmpt_size[31:0] <= 0;
-         c2h_num_pkt <= 32'h1;
-         perf_ctl <= 0;
-      //	 perf_ctl <= 5'b11001;
+         // perf_ctl <= 0;
          scratch_reg1 <=0;
          scratch_reg2 <=0;
          pfch_byp_tag_reg <= 0;
@@ -337,6 +327,7 @@ module user_control
          single_bit_err_inject_reg <= 32'h0;
          double_bit_err_inject_reg <= 32'h0;
          c2h_num_queue <= 32'b1;
+         traffic_pattern <= '0;
          for (int i = 0 ; i < 16 ; i= i+1) 
             rss_indir_table[i] <= 0;
       end
@@ -345,14 +336,14 @@ module user_control
             rss_indir_table[(wr_addr - 32'hA8) >> 2] <= m_axil_wdata; //(wr_addr - A4)/4 is the index, program the indirection table
          end else begin
             case (wr_addr)
-               32'h00 : c2h_st_qid     <= m_axil_wdata[10:0]; //base qid
-               32'h04 : c2h_st_len     <= m_axil_wdata[15:0];
-               32'h08 : control_reg_c2h<= m_axil_wdata[31:0];
+               32'h00 : c2h_st_qid     <= m_axil_wdata[10:0]; //user-defined, base qid
+               32'h04 : c2h_st_len     <= m_axil_wdata[15:0]; //user-defined
+               32'h08 : control_reg_c2h<= m_axil_wdata[31:0]; //user-defined
                32'h0C : control_reg_h2c<= m_axil_wdata[31:0];
-               32'h1C : cycles_per_pkt<= m_axil_wdata[31:0];
-               32'h20 : c2h_num_pkt  <= m_axil_wdata[31:0];
+               32'h1C : cycles_per_pkt<= m_axil_wdata[31:0]; //user-defined
+               32'h20 : traffic_pattern  <= m_axil_wdata[31:0];
                32'h24 : pfch_byp_tag_reg   <= m_axil_wdata[31:0];
-               32'h28 : c2h_num_queue <= m_axil_wdata[10:0]; //number of queues
+               32'h28 : c2h_num_queue <= m_axil_wdata[10:0]; //user-defined, number of queues
                32'h30 : wb_dat[31:0]   <= m_axil_wdata[31:0];
                32'h34 : wb_dat[63:32]  <= m_axil_wdata[31:0];
                32'h38 : wb_dat[95:64]  <= m_axil_wdata[31:0];
@@ -366,26 +357,55 @@ module user_control
                32'h64 : scratch_reg2[31:0]  <= m_axil_wdata[31:0];
                32'h68 : single_bit_err_inject_reg[31:0] <= m_axil_wdata[31:0];
                32'h6C : double_bit_err_inject_reg[31:0] <= m_axil_wdata[31:0];
-               32'h70 : perf_ctl[4:0]  <= m_axil_wdata[4:0];
+               //32'h70 : perf_ctl[4:0]  <= m_axil_wdata[4:0];
                32'h84 : c2h_st_buffsz  <= m_axil_wdata[15:0];
                32'h90 : dsc_bypass[5:0]    <= m_axil_wdata[5:0];
                32'h94 : usr_irq[19:0] <= m_axil_wdata[19:0];
                32'h98 : usr_irq_msk[31:0] <= m_axil_wdata[31:0];
                32'h9C : usr_irq_num[31:0] <= m_axil_wdata[31:0];
                32'hA0 : gen_qdma_reset <= m_axil_wdata[0]; //Write 1 to reset, self clearing register
+               // 32'h8E8: qdma_net_mac_lo[31:0] <= 32'h12345678;
+               // 32'h8EC: qdma_net_mac_hi[31:0] <= 32'h00000011;
+               // 32'h8F0: link_status_reg <= 32'h00000001;
+               // 32'h8F4:;
+               // 32'h8F8:;
+               // 32'h900:;
+
+               // 32'h00 : c2h_st_qid     <= m_axil_wdata[10:0]; //base qid
+               // 32'h04 : c2h_num_queue <= m_axil_wdata[10:0]; //number of queues
+               // 32'h08 : control_reg_c2h<= m_axil_wdata[31:0];
+               // 32'h0C : control_reg_h2c<= m_axil_wdata[31:0];
+               // 32'h10 : pfch_byp_tag_reg   <= m_axil_wdata[31:0];
+               // 32'h14 : pfch_byp_tag_reg   <= m_axil_wdata[31:0];
+               // 32'h18 : pfch_byp_tag_reg   <= m_axil_wdata[31:0];
+               // 32'h1C : wb_dat[31:0]   <= m_axil_wdata[31:0];
+               // 32'h20 : wb_dat[63:32]  <= m_axil_wdata[31:0];
+               // 32'h24 : wb_dat[95:64]  <= m_axil_wdata[31:0];
+               // 32'h28 : wb_dat[127:96] <= m_axil_wdata[31:0];
+               // 32'h2C : wb_dat[159:128]<= m_axil_wdata[31:0];
+               // 32'h30 : wb_dat[191:160]<= m_axil_wdata[31:0];
+               // 32'h34 : wb_dat[223:192]<= m_axil_wdata[31:0];
+               // 32'h38 : wb_dat[255:224]<= m_axil_wdata[31:0];
+               // 32'h3C : cmpt_size[31:0]  <= m_axil_wdata[31:0];
+               // 32'h40 : c2h_st_len     <= m_axil_wdata[15:0]; //flow0
+               // 32'h44 : cycles_per_pkt<= m_axil_wdata[31:0];
+               // 32'h48 : traffic_pattern  <= m_axil_wdata[31:0];
+               // 32'h4C : src_ip <= m_axil_wdata[31:0];
+               // 32'h50 : dst_ip <= m_axil_wdata[31:0];
+               // 32'h54 : src_port <= m_axil_wdata[15:0];
+               // 32'h58 : dst_port <= m_axil_wdata[15:0];
+               // 32'h5C : protocol <= m_axil_wdata[7:0];
                32'hFFFFFFFF: invalid_axilm_addr <= 1'b1;
             endcase // case (m_axil_awaddr[15:0])
          end
       end // if (m_axil_wvalid && m_axil_wready )
       else begin
-         // c2h_num_pkt <= 16'h0400;//0100 0000 0000 1024
-	 control_reg_c2h <= {control_reg_c2h[31:8], c2h_perf_enable_pls, end_c2h_pls, control_reg_c2h[5:3], start_imm,start_c2h_pls,control_reg_c2h[0]};
-	 control_reg_h2c <= {control_reg_h2c[31:1],clr_h2c_match};
-	 perf_ctl[4:0] <= {perf_ctl[4:3],perf_clear,perf_stop, (perf_ctl[0]& ~perf_stop)};
-	 usr_irq[16:0] <= {usr_irq[16:1],usr_irq_in_vld};
-	 gen_qdma_reset <= ~clr_reset & gen_qdma_reset;
-	 usr_irq_num <= usr_irq_clr[2] ? 32'h0 : usr_irq_num;
-//	 wb_dat[31:0] <= {wb_dat[31:20],c2h_st_len[15:0], ~(control_reg_c2h[5] | control_reg_c2h[2]), 3'h0};
+         control_reg_c2h <= {control_reg_c2h[31:7], end_c2h_pls, control_reg_c2h[5:3], start_imm,start_c2h_pls,control_reg_c2h[0]};
+         control_reg_h2c <= {control_reg_h2c[31:1],clr_h2c_match};
+         // perf_ctl[4:0] <= {perf_ctl[4:3],perf_clear,perf_stop, (perf_ctl[0]& ~perf_stop)};
+         usr_irq[16:0] <= {usr_irq[16:1],usr_irq_in_vld};
+         gen_qdma_reset <= ~clr_reset & gen_qdma_reset;
+         usr_irq_num <= usr_irq_clr[2] ? 32'h0 : usr_irq_num;
       end
    end // always @ (posedge axi_aclk)
  
@@ -459,7 +479,7 @@ module user_control
       32'h14 : m_axil_rdata  = h2c_count;
       32'h18 : m_axil_rdata  = {32'h0 | c2h_status};
       32'h1C : m_axil_rdata  = cycles_per_pkt[31:0];
-      32'h20 : m_axil_rdata  = c2h_num_pkt[31:0];
+      32'h20 : m_axil_rdata  = traffic_pattern;
       32'h28 : m_axil_rdata = {32'h0 | c2h_num_queue};
       32'h30 : m_axil_rdata  = wb_dat[31:0];
       32'h34 : m_axil_rdata  = wb_dat[63:32];
@@ -474,11 +494,11 @@ module user_control
       32'h64 : m_axil_rdata  = scratch_reg2[31:0];
       32'h68 : m_axil_rdata  = single_bit_err_inject_reg[31:0];
       32'h6C : m_axil_rdata  = double_bit_err_inject_reg[31:0];
-      32'h70 : m_axil_rdata  = {32'h0 | perf_ctl[4:0]};
-      32'h74 : m_axil_rdata  = data_count[31:0];
-      32'h78 : m_axil_rdata  = data_count[63:32];
-      32'h7C : m_axil_rdata  = valid_count[31:0];
-      32'h80 : m_axil_rdata  = valid_count[63:32];
+      //32'h70 : m_axil_rdata  = {32'h0 | perf_ctl[4:0]};
+      // 32'h74 : m_axil_rdata  = data_count[31:0];
+      // 32'h78 : m_axil_rdata  = data_count[63:32];
+      // 32'h7C : m_axil_rdata  = valid_count[31:0];
+      // 32'h80 : m_axil_rdata  = valid_count[63:32];
       32'h84 : m_axil_rdata  = c2h_st_buffsz[15:0];
       32'h88 : m_axil_rdata  = {32'h0 | axis_pkt_drop[31:0]};
       32'h8C : m_axil_rdata  = {32'h0 | axis_pkt_accept[31:0]};
@@ -488,6 +508,12 @@ module user_control
       32'h9C : m_axil_rdata  = {32'h0 | usr_irq_num[31:0]};
       32'hA0 : m_axil_rdata  = {32'h0 | gen_qdma_reset};
       32'hA4 : m_axil_rdata  = {32'h0 | vdm_msg_rd_dout};
+      32'h8E8: m_axil_rdata  = {32'h0 | qdma_net_mac_lo};
+      32'h8EC: m_axil_rdata  = {32'h0 | qdma_net_mac_hi};
+      32'h8F0: m_axil_rdata  = {32'h0 | link_status_reg};
+      // 32'h8F4:;
+      // 32'h8F8:;
+      // 32'h900:;
       32'hFFFFFFFF: m_axil_rdata = {32'h0 | invalid_axilm_addr};
       default : begin 
          if (rd_addr >= 32'hE8 && rd_addr <= 32'h8E4) m_axil_rdata = rd_output;
@@ -495,8 +521,8 @@ module user_control
       end
       endcase // case (m_axil_araddr[31:0]...
     end // always_comb begin
-   reg perf_ctl_stp;
-   reg perf_ctl_clr;
+   // reg perf_ctl_stp;
+   // reg perf_ctl_clr;
 
    assign h2c_dsc_bypass = dsc_bypass[0];  // 1 : h2c dsc bypass out looped back to dsc bypass in. 0 no loopback 
 
@@ -507,15 +533,14 @@ module user_control
    // 2'b11 : C2H bypass out to Completion loopback
    assign c2h_dsc_bypass = dsc_bypass[2:1];
    logic [31:0] c2h_control_temp;
-   assign c2h_control_temp = { 24'h0, c2h_perf_enable, end_c2h, control_reg_c2h[5:3],start_imm,start_c2h,control_reg_c2h[0]};
+   assign c2h_control_temp = { 25'h0, end_c2h, control_reg_c2h[5:3],start_imm,start_c2h,control_reg_c2h[0]};
    always @(posedge axi_aclk) begin
       if (!axi_aresetn) begin
 	      control_h2c_clr <= 0;
 	      start_c2h_d1 <= 0;
          end_c2h_d1 <= 0;
-         c2h_perf_enable_d1 <= 0;
-	      perf_ctl_stp <= 0;
-	      perf_ctl_clr <= 0;
+	      // perf_ctl_stp <= 0;
+	      // perf_ctl_clr <= 0;
 	      start_imm_d1 <= 0;
          c2h_perform <= 0;
          c2h_control <= 0;
@@ -530,9 +555,8 @@ module user_control
    	   control_h2c_clr <= control_reg_h2c[0];
 	      start_c2h_d1 <= start_c2h;
          end_c2h_d1 <= end_c2h;
-         c2h_perf_enable_d1 <= c2h_perf_enable;
-	      perf_ctl_stp <=  perf_ctl[1];
-	      perf_ctl_clr <=  perf_ctl[2];
+	      // perf_ctl_stp <=  perf_ctl[1];
+	      // perf_ctl_clr <=  perf_ctl[2];
 	      start_imm_d1 <= control_reg_c2h[2] & ~ control_reg_c2h[1];
          c2h_control <= c2h_control_temp;
       end
@@ -541,296 +565,91 @@ module user_control
    // assign start_c2h = control_reg_c2h[1] | (c2h_perform & c2h_end);
    assign start_c2h = control_reg_c2h[1];
    assign end_c2h = control_reg_c2h[6];
-   assign c2h_perf_enable = control_reg_c2h[7];
 
-   // assign c2h_num_pkt = 16'h400;
    assign start_imm = control_reg_c2h[2] & ~start_imm_d1;
 
 //   assign clr_h2c_match = control_reg_h2c[0] & ~control_h2c_clr;
    assign clr_h2c_match = reg_x10_read | (control_reg_h2c[0] & ~control_h2c_clr);
    assign start_c2h_pls = (start_c2h & ~start_c2h_d1) & ~control_reg_c2h[2] & ~control_reg_c2h[5] ;  // for immediate data and Marker no credits will be used 
    assign end_c2h_pls = end_c2h & ~end_c2h_d1;
-   assign c2h_perf_enable_pls = c2h_perf_enable & ~c2h_perf_enable_d1;
-   assign perf_stop = perf_ctl[1] & ~perf_ctl_stp;
-   assign perf_clear = perf_ctl[2] & ~perf_ctl_clr;
+   // assign perf_stop = perf_ctl[1] & ~perf_ctl_stp;
+   // assign perf_clear = perf_ctl[2] & ~perf_ctl_clr;
 	 
    assign st_loopback = control_reg_c2h[0];       // Streaming loopback mode
    
-   wire perf_start = perf_ctl[0];
-   // Performance 
-   wire 	 valids;
-   wire 	 readys;
-   assign valids = axi_mm_h2c_valid | axi_mm_c2h_valid;
-   assign readys = axi_mm_h2c_ready | axi_mm_c2h_ready;
+   // wire perf_start = perf_ctl[0];
+   // // Performance 
+   // wire 	 valids;
+   // wire 	 readys;
+   // assign valids = axi_mm_h2c_valid | axi_mm_c2h_valid;
+   // assign readys = axi_mm_h2c_ready | axi_mm_c2h_ready;
 
-   reg 		 valids_d1;
-   wire 	 valids_pls;
-   wire 	 vld_rdys_pls;
+   // reg 		 valids_d1;
+   // wire 	 valids_pls;
+   // wire 	 vld_rdys_pls;
    
-   always @(posedge axi_aclk)
-      if (!axi_aresetn | perf_stop) begin
-	 valids_d1 <= 1'b0;
-      end
-      else if (~valids_d1) begin
-	 valids_d1 <= valids;
-      end
+   // always @(posedge axi_aclk)
+   //    if (!axi_aresetn | perf_stop) begin
+	//       valids_d1 <= 1'b0;
+   //    end
+   //    else if (~valids_d1) begin
+	//       valids_d1 <= valids;
+   //    end
    
-   assign valids_pls = valids & ~valids_d1;
-   assign vld_rdys_pls = (valids & ~valids_d1) & readys;
+   // assign valids_pls = valids & ~valids_d1;
+   // assign vld_rdys_pls = (valids & ~valids_d1) & readys;
    
-   always @(posedge axi_aclk) begin
-      if (!axi_aresetn | perf_stop) begin
-	 start_counter <= 0;      end
-      else if (perf_start & valids & readys)
-	start_counter <= 1'b1;
-   end
+   // always @(posedge axi_aclk) begin
+   //    if (!axi_aresetn | perf_stop) begin
+	//       start_counter <= 0;      end
+   //    else if (perf_start & valids & readys)
+	//       start_counter <= 1'b1;
+   // end
    
-   always @(posedge axi_aclk) begin
-      if (!axi_aresetn | perf_clear) begin
-	 data_count <= 0;
-	 valid_count <= 0;
-      end
-      else begin
-	 case (perf_ctl[4:3])
-	    2'b00 : begin
-	       data_count <= ((vld_rdys_pls | start_counter) && axi_mm_h2c_valid && axi_mm_h2c_ready) ? data_count+1 :data_count;
-	       valid_count <= (valids_pls | start_counter) ? valid_count + 1 : valid_count;
-	    end
-	   2'b01 : begin
-	      data_count <= ((vld_rdys_pls | start_counter) && axi_mm_c2h_valid && axi_mm_c2h_ready) ? data_count+1 :data_count;
-	      valid_count <= (valids_pls | start_counter) ? valid_count + 1 : valid_count;
-	   end
-	 endcase // case (perf_sel[1:0])
-      end
-   end // always @ (posedge axi_aclk)
+   // always @(posedge axi_aclk) begin
+   //    if (!axi_aresetn | perf_clear) begin
+   //       data_count <= 0;
+   //       valid_count <= 0;
+   //    end
+   //    else begin
+	//    case (perf_ctl[4:3])
+	//       2'b00 : begin
+	//          data_count <= ((vld_rdys_pls | start_counter) && axi_mm_h2c_valid && axi_mm_h2c_ready) ? data_count+1 :data_count;
+	//          valid_count <= (valids_pls | start_counter) ? valid_count + 1 : valid_count;
+	//       end
+	//       2'b01 : begin
+   //          data_count <= ((vld_rdys_pls | start_counter) && axi_mm_c2h_valid && axi_mm_c2h_ready) ? data_count+1 :data_count;
+   //          valid_count <= (valids_pls | start_counter) ? valid_count + 1 : valid_count;
+	//       end
+	//    endcase // case (perf_sel[1:0])
+   //    end
+   // end // always @ (posedge axi_aclk)
 
    // H2C zero byte    
    always@(posedge axi_aclk) begin
-     if (!axi_aresetn) begin
-     h2c_zero_byte_reg <= 'b0;
-     end else begin
-      h2c_zero_byte_reg <= axi_st_h2c_valid & h2c_zero_byte ? 1'b1 : reg_x10_read ? 1'b0 : h2c_zero_byte_reg;
-      end
-   end
-
-
-   // Credit BRAM and 
-   // Traffic manger Credit block
-
-//    assign tm_dsc_sts_rdy = 1;  // always set to 1.
-//    localparam [1:0] 
-//      SM_IDLE = 2'b00,
-//      SM_TFR  = 2'b01,
-//      SM_TEMP = 2'b11,
-//      SM_END  = 2'b10;
-//    reg [1:0] sm_crdt;
-   
-//    reg [31:0]  credit_sent;
-//    reg start_c2h_pls_d1;
-//    reg end_c2h_pls_d1;
-//    wire wr_credit_en;
-//    reg 	tm_update_d1;
-//    wire tm_update;
-//    wire [TM_DSC_BITS-1:0] wr_credit_in;
-//    wire [10:0] 		  wr_credit_qid;
-//    wire [10:0] 		  rd_credit_qid;
-//    reg 			  tm_dsc_sts_qinv_d1;
-//    reg 			  tm_dsc_sts_vld_d1;
-//    reg [15:0] 		  tm_dsc_sts_avl_d1;
-//    reg [10:0] 		  tm_dsc_sts_qid_d1;
-//    reg [10:0] 		  tm_dsc_sts_qid_d2;
-//    wire [TM_DSC_BITS-1:0]  rd_credit_out;
-
-//    always@(posedge axi_aclk) begin
-//       tm_dsc_sts_avl_d1 <= tm_dsc_sts_avl;
-//       tm_update_d1 <= tm_update;
-//       tm_dsc_sts_qinv_d1 <= tm_dsc_sts_qinv;
-//       tm_dsc_sts_qid_d1 <= tm_dsc_sts_qid;
-//       tm_dsc_sts_qid_d2 <= tm_dsc_sts_qid_d1;
-//    end
-
-// //   assign tm_update = tm_dsc_sts_vld & tm_dsc_sts_qen & ~tm_dsc_sts_mm & tm_dsc_sts_dir ;
-//      assign tm_update = tm_dsc_sts_vld & (tm_dsc_sts_qen | tm_dsc_sts_qinv ) & ~tm_dsc_sts_mm & tm_dsc_sts_dir ;
-
-
-//    assign wr_credit_en = tm_update_d1 | credit_updt;
-//    assign wr_credit_in = (tm_update_d1 & tm_dsc_sts_qinv_d1) ? 'h0 : 
-// 			  credit_updt ? rd_credit_out - credit_out : 
-// 			  rd_credit_out + tm_dsc_sts_avl_d1;
-
-//    assign wr_credit_qid = credit_updt ? c2h_qid : tm_dsc_sts_qid_d1;
-//    assign rd_credit_qid = tm_update ? tm_dsc_sts_qid : tm_update_d2 ? tm_dsc_sts_qid_d2 : c2h_qid;
-//    // assign rd_credit_qid = c2h_qid;
-   
-//    xpm_memory_sdpram # 
-//      (
-        
-//       // Common module parameters
-//       .MEMORY_SIZE             (TM_DSC_BITS * 2048),      //positive integer
-//       .MEMORY_PRIMITIVE        ("block"),               //string; "auto", "distributed", "block" or "ultra";
-//       .CLOCKING_MODE           ("common_clock"),        //string; "common_clock", "independent_clock" 
-//       .MEMORY_INIT_FILE        ("none"),                //string; "none" or "<filename>.mem" 
-//       .MEMORY_INIT_PARAM       (""    ),                //string;
-//       .USE_MEM_INIT            (1),                     //integer; 0,1
-//       .WAKEUP_TIME             ("disable_sleep"),       //string; "disable_sleep" or "use_sleep_pin" 
-//       .MESSAGE_CONTROL         (0),                     //integer; 0,1
-//       .ECC_MODE                ("no_ecc"),              //string; "no_ecc", "encode_only", "decode_only" or "both_encode_and_decode" 
-//       .AUTO_SLEEP_TIME         (0),                     //Do not Change
-//       .USE_EMBEDDED_CONSTRAINT (0),                     //integer: 0,1
-      
-//       // Port A module parameters
-//       .WRITE_DATA_WIDTH_A      (TM_DSC_BITS),           //positive integer
-//       .BYTE_WRITE_WIDTH_A      (TM_DSC_BITS),           //integer; 8, 9, or WRITE_DATA_WIDTH_A value
-//       .ADDR_WIDTH_A            (11),                    //positive integer
-      
-//       // Port B module parameters
-//       .READ_DATA_WIDTH_B       (TM_DSC_BITS),           //positive integer
-//       .ADDR_WIDTH_B            (11),                    //positive integer
-//       .READ_RESET_VALUE_B      ("0"),                   //string
-//       .READ_LATENCY_B          (1),                     //non-negative integer
-//       .WRITE_MODE_B            ("read_first")           //string; "write_first", "read_first", "no_change" 
-      
-//       ) xpm_mem_user_credi_i 
-//        (
-	
-// 	// Common module ports
-//         .sleep          (1'b0),
-        
-//         // Port A module ports
-//         .clka           (axi_aclk),
-//         .ena            (wr_credit_en),
-//         .wea            (wr_credit_en),
-//         .addra          (wr_credit_qid),
-//         .dina           (wr_credit_in),
-//         .injectsbiterra (1'b0),
-//         .injectdbiterra (1'b0),
-        
-//         // Port B module ports
-//         .clkb           (axi_aclk),
-//         .rstb           (~axi_aresetn),
-//         .enb            (1'b1),
-//         .regceb         (1'b1),
-//         .addrb          (rd_credit_qid),
-//         .doutb          (rd_credit_out),
-//         .sbiterrb       (),
-//         .dbiterrb       ()
-//         );
-
-//    assign buf_count = c2h_st_buffsz/(C_DATA_WIDTH/8);
-   
-//    always @(posedge axi_aclk) begin
-//       if (!axi_aresetn) begin
-//          tm_vld_out <= 1'b0;
-//          tm_vld_out_d1 <= 1'b0;
-//          tm_vld_out_d2 <= 1'b0;
-//          start_c2h_pls_d1 <=0;
-//          end_c2h_pls_d1 <= 0;
-//       end
-//       else begin
-//          tm_vld_out <= tm_dsc_sts_vld & tm_dsc_sts_qen ;
-//          tm_vld_out_d1 <=tm_vld_out;
-//          tm_vld_out_d2 <=tm_vld_out_d1;
-//          start_c2h_pls_d1 <= start_c2h_pls;
-//          end_c2h_pls_d1 <= end_c2h_pls;
-//       end
-//    end
-
-//    always @(posedge axi_aclk) begin
-//       if (!axi_aresetn) begin
-//          sm_crdt <= SM_IDLE;
-//          credit_updt <= 1'b0;
-//          credit_out <= 0;
-//          credit_sent <= 0;
-//       end
-//       else
-// 	case (sm_crdt)
-// 	  SM_IDLE : begin  // 0
-// 	      if (start_c2h_pls_d1) begin
-// 		      if (rd_credit_out >= credit_needed) begin
-// 		         credit_out <= credit_needed;
-//                credit_updt <= 1'b1;
-//                credit_sent <= credit_needed;
-// 		         sm_crdt <= SM_END;
-// 		      end
-// 		      else begin
-//                credit_updt <= 1'b0;
-//                credit_out <= 0;
-//                credit_sent <= 0;
-// 		         sm_crdt <= SM_TFR;
-// 		      end
-// 	     end
-// 	  end
-// 	  SM_TFR : begin // 1
-// 	     if (tm_vld_out_d2 & (rd_credit_out >= (credit_needed -credit_sent))) begin
-//          // if (rd_credit_out >= (credit_needed -credit_sent)) begin
-//             credit_updt <= 1'b1;
-//             credit_out  <= credit_needed - credit_sent;
-//             credit_sent <= credit_sent + (credit_needed - credit_sent);
-//             sm_crdt <= SM_END;
-// 	     end
-// 	     else if (tm_vld_out_d2 & (rd_credit_out > 0)) begin
-//          // else if (rd_credit_out > 0) begin
-//             credit_updt <= 1'b1;
-//             credit_out  <= rd_credit_out;
-//             credit_sent <= credit_sent + rd_credit_out;
-//             sm_crdt <= SM_TEMP;
-// 	     end
-// 	     else
-// 		      credit_updt <= 1'b0;
-// 	  end
-//      SM_TEMP : begin //2 cycles for updates to become 0 (rd_credit_out - credit_sent)
-//       if (credit_updt == 1'b1) begin
-//          credit_updt <= 1'b0;
-//          sm_crdt <= SM_TEMP;
-//       end else begin 
-//          credit_updt <= 1'b0;
-//          sm_crdt <= SM_TFR;
-//       end
-//      end
-// 	  SM_END : begin // 2
-// 	     sm_crdt <= SM_IDLE;
-// 	     credit_updt <= 1'b0;
-// 	     credit_sent <= 0;
-// 	  end
-// 	endcase // case (sm_crdt)
-//    end
-
-   always @(posedge axi_aclk) begin
       if (!axi_aresetn) begin
-         credit_needed <= 0;
-         credit_perpkt_in <= 0;
-      end
-      else begin
-	 // Designing for 4K buffer size only
-         if (start_c2h_pls) begin
-            // credit_needed <= (c2h_st_len % MAX_ETH_FRAME > 0 ? c2h_st_len/MAX_ETH_FRAME + 1 : c2h_st_len/MAX_ETH_FRAME) * c2h_num_pkt;
-            // credit_needed <= c2h_num_pkt;
-            // credit_perpkt_in <= 1;
-            // credit_perpkt_in <= (c2h_st_len <= MAX_ETH_FRAME) ? 1 : (c2h_st_len % MAX_ETH_FRAME > 0 ? c2h_st_len/MAX_ETH_FRAME + 1 : c2h_st_len/MAX_ETH_FRAME);
-            // credit_needed    <= ((c2h_st_len[15:0] <= MAX_ETH_FRAME) ? 1 : c2h_st_len[15:12]+|c2h_st_len[11:0]) * c2h_num_pkt;
-            // credit_needed <= 2048;
-            // credit_perpkt_in <=  (c2h_st_len[15:0] <= MAX_ETH_FRAME) ? 1 : c2h_st_len[15:12]+|c2h_st_len[11:0];
-            credit_needed <= c2h_num_pkt;
-            credit_perpkt_in <= 1;
-         end
+         h2c_zero_byte_reg <= 'b0;
+      end else begin
+         h2c_zero_byte_reg <= axi_st_h2c_valid & h2c_zero_byte ? 1'b1 : reg_x10_read ? 1'b0 : h2c_zero_byte_reg;
       end
    end
+
 
    // Axi Streaming Paket drop
    always @(posedge axi_aclk) begin
       if (!axi_aresetn) begin
-	 axis_pkt_drop <=0;
-	 axis_pkt_accept <=0;
+         axis_pkt_drop <=0;
+         axis_pkt_accept <=0;
       end
       else begin
-	 if (start_c2h_pls) begin
-	    axis_pkt_drop <= 0;
-	    axis_pkt_accept <=0;
-	 end
-	 else if (axis_c2h_drop_valid) begin
-	    axis_pkt_drop   <= axis_c2h_drop ? axis_pkt_drop + 1 : axis_pkt_drop;
-	    axis_pkt_accept <= ~axis_c2h_drop ? axis_pkt_accept+1 : axis_pkt_accept;
-	 end
+         if (start_c2h_pls) begin
+            axis_pkt_drop <= 0;
+            axis_pkt_accept <=0;
+         end
+         else if (axis_c2h_drop_valid) begin
+            axis_pkt_drop   <= axis_c2h_drop ? axis_pkt_drop + 1 : axis_pkt_drop;
+            axis_pkt_accept <= ~axis_c2h_drop ? axis_pkt_accept+1 : axis_pkt_accept;
+         end
       end
    end
 

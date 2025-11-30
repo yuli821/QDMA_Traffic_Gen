@@ -73,7 +73,6 @@
 ##########################################################################################################################
 # # # #                            User Time Names / User Time Groups / Time Specs                                 # # # #
 ##########################################################################################################################
-create_clock -period 10.000 -name sys_clk [get_ports sys_clk_p]
 #
 #
 ##########################################################################################################################
@@ -89,7 +88,6 @@ set_property LOC GTY_QUAD_X0Y4 [get_cells [get_cells -hierarchical -filter PRIMI
 set_property LOC GTY_QUAD_X0Y3 [get_cells [get_cells -hierarchical -filter PRIMITIVE_SUBGROUP==GT] -filter NAME=~*/gt_quad_0/*]
 
 #########################################################################
-set_property BITSTREAM.GENERAL.COMPRESS true [current_design]
 ########################################################################
 #set_multicycle_path -setup -from [get_pins -hierarchical -filter {NAME =~ *phy_pipeline/pcie_ltssm_state_chain/with_ff_chain.ff_chain_gen[0].sync_rst.ff_chain_reg[1][*]/C}] -to [get_pins -hierarchical -filter {NAME =~ */*gt_quad_*/inst/quad_inst/PCIELTSSM[*]}] 2
 #set_multicycle_path -hold  -from [get_pins -hierarchical -filter {NAME =~ *phy_pipeline/pcie_ltssm_state_chain/with_ff_chain.ff_chain_gen[0].sync_rst.ff_chain_reg[1][*]/C}] -to [get_pins -hierarchical -filter {NAME =~ */*gt_quad_*/inst/quad_inst/PCIELTSSM[*]}] 1
@@ -158,7 +156,35 @@ set_property BITSTREAM.GENERAL.COMPRESS true [current_design]
 
 
 
-set_property LOC SLICE_X116Y293 [get_cells {qdma_app_i/axi_st_module_i/traffic_gen_c2h/hash_value/hash_reg[0]_rep__1_replica_5}]
-set_property LOC SLICE_X111Y293 [get_cells {qdma_app_i/axi_st_module_i/traffic_gen_c2h/hash_value/hash_reg[1]_rep__1_replica_9}]
+
+
+
+
+
+
+
+####################################################################################
+# Constraints from file : 'xpm_cdc_array_single.tcl'
+####################################################################################
+
+
+
+
+
+####################################################################################
+# Constraints from file : 'xpm_cdc_async_rst.tcl'
+####################################################################################
+
+
+
+
+create_clock -period 10.000 -name sys_clk [get_ports sys_clk_p]
+
+####################################################################################
+# Constraints from file : 'xpm_cdc_async_rst.tcl'
+####################################################################################
+
+
+
 
 

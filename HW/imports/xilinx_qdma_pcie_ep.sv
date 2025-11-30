@@ -75,7 +75,22 @@ module xilinx_qdma_pcie_ep #
     input  [(PL_LINK_CAP_MAX_LINK_WIDTH - 1) : 0]   pci_exp_rxp,
     input  [(PL_LINK_CAP_MAX_LINK_WIDTH - 1) : 0]   pci_exp_rxn,
 
-
+    output ddr4_dimm1_act_n,
+    output [16:0]ddr4_dimm1_adr,
+    output [1:0]ddr4_dimm1_ba,
+    output [1:0]ddr4_dimm1_bg,
+    output ddr4_dimm1_ck_c,
+    output ddr4_dimm1_ck_t,
+    output ddr4_dimm1_cke,
+    output ddr4_dimm1_cs_n,
+    inout [7:0]ddr4_dimm1_dm_n,
+    inout [63:0]ddr4_dimm1_dq,
+    inout [7:0]ddr4_dimm1_dqs_c,
+    inout [7:0]ddr4_dimm1_dqs_t,
+    output ddr4_dimm1_odt,
+    output ddr4_dimm1_reset_n,
+    input ddr4_dimm1_sma_clk_clk_n,
+    input ddr4_dimm1_sma_clk_clk_p,
 
 
     input   sys_clk_p,
@@ -590,17 +605,28 @@ module xilinx_qdma_pcie_ep #
   wire [15:0] buf_count;
   wire        sys_clk_gt;
 
+  wire [12:0]bram_addrb;
+  wire bram_clkb;
+  wire [31:0]bram_dinb;
+  wire [31:0]bram_doutb;
+  wire bram_enb;
+  wire bram_rstb;
+  wire [3:0]bram_web;
+
+  wire [511:0] m_axis_cq_monitor_tdata;
+  wire [15:0] m_axis_cq_monitor_tkeep;
+  wire m_axis_cq_monitor_tlast;
+  wire m_axis_cq_monitor_tready;
+  wire [228:0] m_axis_cq_monitor_tuser;
+  wire m_axis_cq_monitor_tvalid;
+  wire user_clk_ip;
+  wire user_reset_ip;
+
 
   // Ref clock buffer
 //  IBUFDS_GTE5 # (.REFCLK_HROW_CK_SEL(2'b00)) refclk_ibuf (.O(sys_clk_gt), .ODIV2(sys_clk), .I(sys_clk_p), .CEB(1'b0), .IB(sys_clk_n));
   // Reset buffer
   IBUF   sys_reset_n_ibuf (.O(sys_rst_n_c), .I(sys_rst_n));
-
-
-
-
-//
-//
 
 
 
@@ -718,12 +744,12 @@ module xilinx_qdma_pcie_ep #
     .dsc_crdt_in_crdt (dsc_crdt_in_crdt),
 
 
-     .qsts_out_op      (qsts_out_op),
-     .qsts_out_data    (qsts_out_data),
-     .qsts_out_port_id (qsts_out_port_id),
-     .qsts_out_qid     (qsts_out_qid),
-     .qsts_out_vld     (qsts_out_vld),
-     .qsts_out_rdy     (qsts_out_rdy),
+    .qsts_out_op      (qsts_out_op),
+    .qsts_out_data    (qsts_out_data),
+    .qsts_out_port_id (qsts_out_port_id),
+    .qsts_out_qid     (qsts_out_qid),
+    .qsts_out_vld     (qsts_out_vld),
+    .qsts_out_rdy     (qsts_out_rdy),
 
     .usr_irq_valid(usr_irq_in_vld),
     .usr_irq_vec  (usr_irq_in_vec),
@@ -736,7 +762,43 @@ module xilinx_qdma_pcie_ep #
     .usr_flr_clear    (usr_flr_clr),
     .usr_flr_done_fnc (usr_flr_done_fnc),
     .usr_flr_done_vld (usr_flr_done_vld),
-    .user_lnk_up (user_lnk_up)
+    .user_lnk_up (user_lnk_up),
+
+    //BRAM: PS <--> PL
+    .BRAM_PORTB_addr  (bram_addrb),
+    .BRAM_PORTB_clk  (bram_clkb),
+    .BRAM_PORTB_din  (bram_dinb),
+    .BRAM_PORTB_dout  (bram_doutb),
+    .BRAM_PORTB_en  (bram_enb),
+    .BRAM_PORTB_rst  (bram_rstb),
+    .BRAM_PORTB_we   (bram_web),
+
+    .ddr4_dimm1_0_act_n (ddr4_dimm1_act_n),
+    .ddr4_dimm1_0_adr (ddr4_dimm1_adr),
+    .ddr4_dimm1_0_ba (ddr4_dimm1_ba),
+    .ddr4_dimm1_0_bg (ddr4_dimm1_bg),
+    .ddr4_dimm1_0_ck_c (ddr4_dimm1_ck_c),
+    .ddr4_dimm1_0_ck_t (ddr4_dimm1_ck_t),
+    .ddr4_dimm1_0_cke (ddr4_dimm1_cke),
+    .ddr4_dimm1_0_cs_n (ddr4_dimm1_cs_n),
+    .ddr4_dimm1_0_dm_n (ddr4_dimm1_dm_n),
+    .ddr4_dimm1_0_dq (ddr4_dimm1_dq),
+    .ddr4_dimm1_0_dqs_c (ddr4_dimm1_dqs_c),
+    .ddr4_dimm1_0_dqs_t (ddr4_dimm1_dqs_t),
+    .ddr4_dimm1_0_odt (ddr4_dimm1_odt),
+    .ddr4_dimm1_0_reset_n (ddr4_dimm1_reset_n),
+    .ddr4_dimm1_sma_clk_0_clk_n (ddr4_dimm1_sma_clk_clk_n),
+    .ddr4_dimm1_sma_clk_0_clk_p (ddr4_dimm1_sma_clk_clk_p),
+
+    //m_axis_cq_monitor port
+    .m_axis_cq_monitor_tdata(m_axis_cq_monitor_tdata),
+    .m_axis_cq_monitor_tkeep(m_axis_cq_monitor_tkeep),
+    .m_axis_cq_monitor_tlast(m_axis_cq_monitor_tlast),
+    .m_axis_cq_monitor_tready(m_axis_cq_monitor_tready),
+    .m_axis_cq_monitor_tuser(m_axis_cq_monitor_tuser),
+    .m_axis_cq_monitor_tvalid(m_axis_cq_monitor_tvalid),
+    .user_clk(user_clk_ip),
+    .user_reset(user_reset_ip)
 );
 
 
@@ -754,118 +816,127 @@ module xilinx_qdma_pcie_ep #
     .rst_n(axi_aresetn),
     .soft_reset_n(soft_reset_n),
 
-      // AXI Lite Master Interface connections
-      .s_axil_awaddr  (m_axil_awaddr[31:0]),
-      .s_axil_awvalid (m_axil_awvalid),
-      .s_axil_awready (m_axil_awready),
-      .s_axil_wdata   (m_axil_wdata[31:0]),    // block fifo for AXI lite only 31 bits.
-      .s_axil_wstrb   (m_axil_wstrb[3:0]),
-      .s_axil_wvalid  (m_axil_wvalid),
-      .s_axil_wready  (m_axil_wready),
-      .s_axil_bresp   (m_axil_bresp),
-      .s_axil_bvalid  (m_axil_bvalid),
-      .s_axil_bready  (m_axil_bready),
-      .s_axil_araddr  (m_axil_araddr[31:0]),
-      .s_axil_arvalid (m_axil_arvalid),
-      .s_axil_arready (m_axil_arready),
-      .s_axil_rdata   (m_axil_rdata),   // block ram for AXI Lite is only 31 bits
-      .s_axil_rresp   (m_axil_rresp),
-      .s_axil_rvalid  (m_axil_rvalid),
-      .s_axil_rready  (m_axil_rready),
+    //access axi bram
+    .bram_addrb  (bram_addrb),
+    .bram_clkb  (bram_clkb),
+    .bram_dinb  (bram_dinb),
+    .bram_doutb  (bram_doutb),
+    .bram_enb  (bram_enb),
+    .bram_rstb  (bram_rstb),
+    .bram_web   (bram_web),
+
+    // AXI Lite Master Interface connections
+    .s_axil_awaddr  (m_axil_awaddr[31:0]),
+    .s_axil_awvalid (m_axil_awvalid),
+    .s_axil_awready (m_axil_awready),
+    .s_axil_wdata   (m_axil_wdata[31:0]),    // block fifo for AXI lite only 31 bits.
+    .s_axil_wstrb   (m_axil_wstrb[3:0]),
+    .s_axil_wvalid  (m_axil_wvalid),
+    .s_axil_wready  (m_axil_wready),
+    .s_axil_bresp   (m_axil_bresp),
+    .s_axil_bvalid  (m_axil_bvalid),
+    .s_axil_bready  (m_axil_bready),
+    .s_axil_araddr  (m_axil_araddr[31:0]),
+    .s_axil_arvalid (m_axil_arvalid),
+    .s_axil_arready (m_axil_arready),
+    .s_axil_rdata   (m_axil_rdata),   // block ram for AXI Lite is only 31 bits
+    .s_axil_rresp   (m_axil_rresp),
+    .s_axil_rvalid  (m_axil_rvalid),
+    .s_axil_rready  (m_axil_rready),
 
 
 
-      .c2h_byp_out_dsc      (c2h_byp_out_dsc),
-      .c2h_byp_out_fmt      (c2h_byp_out_fmt),
-      .c2h_byp_out_st_mm    (c2h_byp_out_st_mm),
-      .c2h_byp_out_dsc_sz   (c2h_byp_out_dsc_sz),
-      .c2h_byp_out_qid      (c2h_byp_out_qid),
-      .c2h_byp_out_error    (c2h_byp_out_error),
-      .c2h_byp_out_func     (c2h_byp_out_func),
-      .c2h_byp_out_cidx     (c2h_byp_out_cidx),
-      .c2h_byp_out_port_id  (c2h_byp_out_port_id),
-      .c2h_byp_out_pfch_tag (c2h_byp_out_pfch_tag),
-      .c2h_byp_out_vld      (c2h_byp_out_vld),
-      .c2h_byp_out_rdy      (c2h_byp_out_rdy),
+    .c2h_byp_out_dsc      (c2h_byp_out_dsc),
+    .c2h_byp_out_fmt      (c2h_byp_out_fmt),
+    .c2h_byp_out_st_mm    (c2h_byp_out_st_mm),
+    .c2h_byp_out_dsc_sz   (c2h_byp_out_dsc_sz),
+    .c2h_byp_out_qid      (c2h_byp_out_qid),
+    .c2h_byp_out_error    (c2h_byp_out_error),
+    .c2h_byp_out_func     (c2h_byp_out_func),
+    .c2h_byp_out_cidx     (c2h_byp_out_cidx),
+    .c2h_byp_out_port_id  (c2h_byp_out_port_id),
+    .c2h_byp_out_pfch_tag (c2h_byp_out_pfch_tag),
+    .c2h_byp_out_vld      (c2h_byp_out_vld),
+    .c2h_byp_out_rdy      (c2h_byp_out_rdy),
 
-      .c2h_byp_in_mm_radr     (c2h_byp_in_mm_radr),
-      .c2h_byp_in_mm_wadr     (c2h_byp_in_mm_wadr),
-      .c2h_byp_in_mm_len      (c2h_byp_in_mm_len),
-      .c2h_byp_in_mm_mrkr_req (c2h_byp_in_mm_mrkr_req),
-      .c2h_byp_in_mm_sdi      (c2h_byp_in_mm_sdi),
-      .c2h_byp_in_mm_qid      (c2h_byp_in_mm_qid),
-      .c2h_byp_in_mm_error    (c2h_byp_in_mm_error),
-      .c2h_byp_in_mm_func     (c2h_byp_in_mm_func),
-      .c2h_byp_in_mm_cidx     (c2h_byp_in_mm_cidx),
-      .c2h_byp_in_mm_port_id  (c2h_byp_in_mm_port_id),
-      .c2h_byp_in_mm_at       (c2h_byp_in_mm_at),
-      .c2h_byp_in_mm_no_dma   (c2h_byp_in_mm_no_dma),
-      .c2h_byp_in_mm_vld      (c2h_byp_in_mm_vld),
-      .c2h_byp_in_mm_rdy      (c2h_byp_in_mm_rdy),
+    .c2h_byp_in_mm_radr     (c2h_byp_in_mm_radr),
+    .c2h_byp_in_mm_wadr     (c2h_byp_in_mm_wadr),
+    .c2h_byp_in_mm_len      (c2h_byp_in_mm_len),
+    .c2h_byp_in_mm_mrkr_req (c2h_byp_in_mm_mrkr_req),
+    .c2h_byp_in_mm_sdi      (c2h_byp_in_mm_sdi),
+    .c2h_byp_in_mm_qid      (c2h_byp_in_mm_qid),
+    .c2h_byp_in_mm_error    (c2h_byp_in_mm_error),
+    .c2h_byp_in_mm_func     (c2h_byp_in_mm_func),
+    .c2h_byp_in_mm_cidx     (c2h_byp_in_mm_cidx),
+    .c2h_byp_in_mm_port_id  (c2h_byp_in_mm_port_id),
+    .c2h_byp_in_mm_at       (c2h_byp_in_mm_at),
+    .c2h_byp_in_mm_no_dma   (c2h_byp_in_mm_no_dma),
+    .c2h_byp_in_mm_vld      (c2h_byp_in_mm_vld),
+    .c2h_byp_in_mm_rdy      (c2h_byp_in_mm_rdy),
 
-      .c2h_byp_in_st_csh_addr    (c2h_byp_in_st_csh_addr),
-      .c2h_byp_in_st_csh_qid     (c2h_byp_in_st_csh_qid),
-      .c2h_byp_in_st_csh_error   (c2h_byp_in_st_csh_error),
-      .c2h_byp_in_st_csh_func    (c2h_byp_in_st_csh_func),
-      .c2h_byp_in_st_csh_port_id (c2h_byp_in_st_csh_port_id),
-      .c2h_byp_in_st_csh_pfch_tag(c2h_byp_in_st_csh_pfch_tag),
-      .c2h_byp_in_st_csh_at      (c2h_byp_in_st_csh_at),
-      .c2h_byp_in_st_csh_vld     (c2h_byp_in_st_csh_vld),
-      .c2h_byp_in_st_csh_rdy     (c2h_byp_in_st_csh_rdy),
+    .c2h_byp_in_st_csh_addr    (c2h_byp_in_st_csh_addr),
+    .c2h_byp_in_st_csh_qid     (c2h_byp_in_st_csh_qid),
+    .c2h_byp_in_st_csh_error   (c2h_byp_in_st_csh_error),
+    .c2h_byp_in_st_csh_func    (c2h_byp_in_st_csh_func),
+    .c2h_byp_in_st_csh_port_id (c2h_byp_in_st_csh_port_id),
+    .c2h_byp_in_st_csh_pfch_tag(c2h_byp_in_st_csh_pfch_tag),
+    .c2h_byp_in_st_csh_at      (c2h_byp_in_st_csh_at),
+    .c2h_byp_in_st_csh_vld     (c2h_byp_in_st_csh_vld),
+    .c2h_byp_in_st_csh_rdy     (c2h_byp_in_st_csh_rdy),
 
-      .h2c_byp_out_dsc      (h2c_byp_out_dsc),
-      .h2c_byp_out_fmt      (h2c_byp_out_fmt),
-      .h2c_byp_out_st_mm    (h2c_byp_out_st_mm),
-      .h2c_byp_out_dsc_sz   (h2c_byp_out_dsc_sz),
-      .h2c_byp_out_qid      (h2c_byp_out_qid),
-      .h2c_byp_out_error    (h2c_byp_out_error),
-      .h2c_byp_out_func     (h2c_byp_out_func),
-      .h2c_byp_out_cidx     (h2c_byp_out_cidx),
-      .h2c_byp_out_port_id  (h2c_byp_out_port_id),
-      .h2c_byp_out_vld      (h2c_byp_out_vld),
-      .h2c_byp_out_rdy      (h2c_byp_out_rdy),
+    .h2c_byp_out_dsc      (h2c_byp_out_dsc),
+    .h2c_byp_out_fmt      (h2c_byp_out_fmt),
+    .h2c_byp_out_st_mm    (h2c_byp_out_st_mm),
+    .h2c_byp_out_dsc_sz   (h2c_byp_out_dsc_sz),
+    .h2c_byp_out_qid      (h2c_byp_out_qid),
+    .h2c_byp_out_error    (h2c_byp_out_error),
+    .h2c_byp_out_func     (h2c_byp_out_func),
+    .h2c_byp_out_cidx     (h2c_byp_out_cidx),
+    .h2c_byp_out_port_id  (h2c_byp_out_port_id),
+    .h2c_byp_out_vld      (h2c_byp_out_vld),
+    .h2c_byp_out_rdy      (h2c_byp_out_rdy),
 
-      .h2c_byp_in_mm_radr     (h2c_byp_in_mm_radr),
-      .h2c_byp_in_mm_wadr     (h2c_byp_in_mm_wadr),
-      .h2c_byp_in_mm_len      (h2c_byp_in_mm_len),
-      .h2c_byp_in_mm_mrkr_req (h2c_byp_in_mm_mrkr_req),
-      .h2c_byp_in_mm_sdi      (h2c_byp_in_mm_sdi),
-      .h2c_byp_in_mm_qid      (h2c_byp_in_mm_qid),
-      .h2c_byp_in_mm_error    (h2c_byp_in_mm_error),
-      .h2c_byp_in_mm_func     (h2c_byp_in_mm_func),
-      .h2c_byp_in_mm_cidx     (h2c_byp_in_mm_cidx),
-      .h2c_byp_in_mm_port_id  (h2c_byp_in_mm_port_id),
-      .h2c_byp_in_mm_at       (h2c_byp_in_mm_at),
-      .h2c_byp_in_mm_no_dma   (h2c_byp_in_mm_no_dma),
-      .h2c_byp_in_mm_vld      (h2c_byp_in_mm_vld),
-      .h2c_byp_in_mm_rdy      (h2c_byp_in_mm_rdy),
+    .h2c_byp_in_mm_radr     (h2c_byp_in_mm_radr),
+    .h2c_byp_in_mm_wadr     (h2c_byp_in_mm_wadr),
+    .h2c_byp_in_mm_len      (h2c_byp_in_mm_len),
+    .h2c_byp_in_mm_mrkr_req (h2c_byp_in_mm_mrkr_req),
+    .h2c_byp_in_mm_sdi      (h2c_byp_in_mm_sdi),
+    .h2c_byp_in_mm_qid      (h2c_byp_in_mm_qid),
+    .h2c_byp_in_mm_error    (h2c_byp_in_mm_error),
+    .h2c_byp_in_mm_func     (h2c_byp_in_mm_func),
+    .h2c_byp_in_mm_cidx     (h2c_byp_in_mm_cidx),
+    .h2c_byp_in_mm_port_id  (h2c_byp_in_mm_port_id),
+    .h2c_byp_in_mm_at       (h2c_byp_in_mm_at),
+    .h2c_byp_in_mm_no_dma   (h2c_byp_in_mm_no_dma),
+    .h2c_byp_in_mm_vld      (h2c_byp_in_mm_vld),
+    .h2c_byp_in_mm_rdy      (h2c_byp_in_mm_rdy),
 
-      .h2c_byp_in_st_addr     (h2c_byp_in_st_addr),
-      .h2c_byp_in_st_len      (h2c_byp_in_st_len),
-      .h2c_byp_in_st_eop      (h2c_byp_in_st_eop),
-      .h2c_byp_in_st_sop      (h2c_byp_in_st_sop),
-      .h2c_byp_in_st_mrkr_req (h2c_byp_in_st_mrkr_req),
-      .h2c_byp_in_st_sdi      (h2c_byp_in_st_sdi),
-      .h2c_byp_in_st_qid      (h2c_byp_in_st_qid),
-      .h2c_byp_in_st_error    (h2c_byp_in_st_error),
-      .h2c_byp_in_st_func     (h2c_byp_in_st_func),
-      .h2c_byp_in_st_cidx     (h2c_byp_in_st_cidx),
-      .h2c_byp_in_st_port_id  (h2c_byp_in_st_port_id),
-      .h2c_byp_in_st_at       (h2c_byp_in_st_at),
-      .h2c_byp_in_st_no_dma   (h2c_byp_in_st_no_dma),
-      .h2c_byp_in_st_vld      (h2c_byp_in_st_vld),
-      .h2c_byp_in_st_rdy      (h2c_byp_in_st_rdy),
+    .h2c_byp_in_st_addr     (h2c_byp_in_st_addr),
+    .h2c_byp_in_st_len      (h2c_byp_in_st_len),
+    .h2c_byp_in_st_eop      (h2c_byp_in_st_eop),
+    .h2c_byp_in_st_sop      (h2c_byp_in_st_sop),
+    .h2c_byp_in_st_mrkr_req (h2c_byp_in_st_mrkr_req),
+    .h2c_byp_in_st_sdi      (h2c_byp_in_st_sdi),
+    .h2c_byp_in_st_qid      (h2c_byp_in_st_qid),
+    .h2c_byp_in_st_error    (h2c_byp_in_st_error),
+    .h2c_byp_in_st_func     (h2c_byp_in_st_func),
+    .h2c_byp_in_st_cidx     (h2c_byp_in_st_cidx),
+    .h2c_byp_in_st_port_id  (h2c_byp_in_st_port_id),
+    .h2c_byp_in_st_at       (h2c_byp_in_st_at),
+    .h2c_byp_in_st_no_dma   (h2c_byp_in_st_no_dma),
+    .h2c_byp_in_st_vld      (h2c_byp_in_st_vld),
+    .h2c_byp_in_st_rdy      (h2c_byp_in_st_rdy),
 
-      .user_clk(axi_aclk),
-      .user_resetn(axi_aresetn),
-      .user_lnk_up(user_lnk_up),
+    .user_clk(axi_aclk),
+    .user_resetn(axi_aresetn),
+    .user_lnk_up(user_lnk_up),
 
 
-    .usr_flr_fnc ( usr_flr_fnc ),
-    .usr_flr_set ( usr_flr_set ),
-    .usr_flr_clr ( usr_flr_clr) ,
-    .usr_flr_done_fnc (usr_flr_done_fnc),
-    .usr_flr_done_vld (usr_flr_done_vld),
+  .usr_flr_fnc ( usr_flr_fnc ),
+  .usr_flr_set ( usr_flr_set ),
+  .usr_flr_clr ( usr_flr_clr) ,
+  .usr_flr_done_fnc (usr_flr_done_fnc),
+  .usr_flr_done_vld (usr_flr_done_vld),
 
   .sys_rst_n(sys_rst_n_c),
 

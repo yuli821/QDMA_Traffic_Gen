@@ -88,7 +88,6 @@ module axi_st_module
     input [31:0] c2h_control,
     input clr_h2c_match,
     input [15:0] c2h_st_len,
-    input [31:0] c2h_num_pkt,
     input [31:0] cmpt_size,
     input [255:0] wb_dat,
     input   [C_DATA_WIDTH-1 :0]    m_axis_h2c_tdata /* synthesis syn_keep = 1 */,
@@ -141,10 +140,6 @@ module axi_st_module
     output [2:0]                   s_axis_c2h_cmpt_ctrl_col_idx,
     output [2:0]                   s_axis_c2h_cmpt_ctrl_err_idx,
     input                          s_axis_c2h_cmpt_tready,
-    input [TM_DSC_BITS-1:0]        credit_in,
-    input [31:0]        credit_needed,
-    input [TM_DSC_BITS-1:0]        credit_perpkt_in,
-    input                          credit_updt,
     input [15:0]                   buf_count,
     input 			   byp_to_cmp,
     input [511 : 0] 		   byp_data_to_cmp,
@@ -158,7 +153,9 @@ module axi_st_module
     output [31:0] hash_val,
     input c2h_perform,
     input [31:0] read_addr,
-    output [31:0] rd_output
+    output [31:0] rd_output,
+    input [31:0] cycles_per_pkt_2,
+    input [31:0] traffic_pattern
     );
 
    logic [CRC_WIDTH-1 : 0]     gen_h2c_tcrc;
@@ -211,8 +208,10 @@ end
 assign s_axis_c2h_ctrl_marker = c2h_control[5];   // C2H Marker Enabled
 
 assign s_axis_c2h_ctrl_has_cmpt =  ~c2h_control[3];  // Disable completions
-assign s_axis_c2h_mty = s_axis_c2h_tlast ? s_axis_c2h_mty_reg : 6'h0;
-assign s_axis_c2h_ctrl_len = s_axis_c2h_ctrl_len_reg;
+
+//Integrate change:
+//assign s_axis_c2h_mty = s_axis_c2h_tlast ? s_axis_c2h_mty_reg : 6'h0;
+//assign s_axis_c2h_ctrl_len = s_axis_c2h_ctrl_len_reg;
 
 assign s_axis_c2h_ctrl_qid = c2h_dsc_bypass[1:0] == 2'b10 ? pfch_byp_tag_qid : c2h_qid;
 
@@ -235,97 +234,204 @@ crc32_gen #(
   .out_crc          ( s_axis_c2h_tcrc   )
 );
 
-//    ST_c2h #(
-//    .BIT_WIDTH   ( C_DATA_WIDTH ),
-//    .TM_DSC_BITS ( TM_DSC_BITS )
-//     )
-//    ST_c2h_0 
-//      (
-// .axi_aclk    (axi_aclk),
-// .axi_aresetn (axi_aresetn),
-// .control_reg (c2h_control),
-// .txr_size    (s_axis_c2h_ctrl_len),
-// .num_pkt     (c2h_num_pkt),
-// .credit_in   (credit_in),
-// .credit_perpkt_in (credit_perpkt_in),
-// .credit_needed   (credit_needed),
-// .credit_updt (credit_updt),
-// .buf_count   (buf_count),
-// .c2h_tdata   (s_axis_c2h_tdata),
-// .c2h_dpar    (s_axis_c2h_dpar),
-// .c2h_tvalid  (s_axis_c2h_tvalid),
-// .c2h_tlast   (s_axis_c2h_tlast),
-// .c2h_end     (c2h_end),
-// .c2h_tready  (s_axis_c2h_tready)
+localparam NUM_QUEUES = 16;  // Support up to 16 queues (can be adjusted)
+
+
+
+// Credit registers per queue
+logic signed [31:0] credit_reg [0:NUM_QUEUES-1];
+
+// Control signals
+logic        tm_update, tm_update_d1;
+logic [15:0] tm_dsc_sts_avl_d1;
+logic [10:0] tm_dsc_sts_qid_d1;
+logic        tm_dsc_sts_qinv_d1;
+
+// Packet consumption tracking
+logic        pkt_consume;         // Packet sent (consumes 1 descriptor)
+logic        pkt_consume_d1;
+logic [10:0] consume_qid;         // Queue ID for consumed packet
+logic [10:0] consume_qid_d1;
+
+// Conflict detection
+logic        wr_conflict;
+
+//------------------------------------------------------------------------------
+// Packet consumption signals from C2H interface
+//------------------------------------------------------------------------------
+// Extract queue ID from C2H control interface
+// For now, use s_axis_c2h_ctrl_qid output from TCP module
+// When packet completes (tlast), consume 1 credit for that queue
+assign consume_qid = s_axis_c2h_ctrl_qid;  // Queue ID from TCP module
+assign pkt_consume = s_axis_c2h_tvalid && s_axis_c2h_tready && s_axis_c2h_tlast;
+
+//------------------------------------------------------------------------------
+// Delayed signals for timing (match traffic_gen.sv)
+//------------------------------------------------------------------------------
+always_ff @(posedge axi_aclk) begin
+    tm_update_d1        <= tm_update;
+    tm_dsc_sts_avl_d1   <= tm_dsc_sts_avl;
+    tm_dsc_sts_qid_d1   <= tm_dsc_sts_qid;
+    tm_dsc_sts_qinv_d1  <= tm_dsc_sts_qinv;
+    pkt_consume_d1      <= pkt_consume;
+    consume_qid_d1      <= consume_qid;
+end
+
+//------------------------------------------------------------------------------
+// QDMA Traffic Manager update condition
+// Only for C2H streaming mode (same as traffic_gen line 119)
+//------------------------------------------------------------------------------
+assign tm_update = tm_dsc_sts_vld & 
+                   (tm_dsc_sts_qen | tm_dsc_sts_qinv) & 
+                   ~tm_dsc_sts_mm &      // Streaming (not memory-mapped)
+                   tm_dsc_sts_dir;       // C2H (not H2C)
+
+//------------------------------------------------------------------------------
+// Conflict detection: simultaneous QDMA update and packet consumption
+// on the SAME queue (same as traffic_gen line 120)
+//------------------------------------------------------------------------------
+assign wr_conflict = tm_update_d1 & pkt_consume_d1 & 
+                     (tm_dsc_sts_qid_d1 == consume_qid_d1);
+
+//------------------------------------------------------------------------------
+// Multi-Queue Credit Calculation
+// Exactly follows traffic_gen.sv logic (lines 82-101)
+//------------------------------------------------------------------------------
+always_ff @(posedge axi_aclk) begin
+    if (~axi_aresetn) begin
+        // Initialize all queue credits to 0
+        for (int i = 0; i < NUM_QUEUES; i++) begin
+            credit_reg[i] <= 32'sd0;
+        end
+    end
+    else begin
+        // CASE 1: Conflict - same queue update and consume (traffic_gen line 87-92)
+        if (wr_conflict) begin
+            // Same queue: add new credits and subtract consumed packet in one step
+            credit_reg[tm_dsc_sts_qid_d1] <= tm_dsc_sts_qinv_d1 ? 32'sd0 : 
+                credit_reg[tm_dsc_sts_qid_d1] + $signed({16'd0, tm_dsc_sts_avl_d1}) - 32'sd1;
+        end
+        // CASE 2 & 3: No conflict - handle updates independently
+        else begin
+            // QDMA descriptor status update (traffic_gen line 94-96)
+            if (tm_update_d1) begin
+                credit_reg[tm_dsc_sts_qid_d1] <= tm_dsc_sts_qinv_d1 ? 32'sd0 : 
+                    credit_reg[tm_dsc_sts_qid_d1] + $signed({16'd0, tm_dsc_sts_avl_d1});
+            end
+            
+            // Packet consumption (traffic_gen line 97-99)
+            // Note: This can happen simultaneously with update on DIFFERENT queue
+            if (pkt_consume_d1) begin
+                credit_reg[consume_qid_d1] <= credit_reg[consume_qid_d1] - 32'sd1;
+            end
+        end
+    end
+end
+
+//------------------------------------------------------------------------------
+// Credit availability check for TCP module's queue
+// TCP module provides its current queue ID via s_axis_c2h_ctrl_qid
+//------------------------------------------------------------------------------
+logic c2h_dsc_available;
+assign c2h_dsc_available = (credit_reg[consume_qid] > 32'sd0);
+
+//------------------------------------------------------------------------------
+// Always ready to accept descriptor status from QDMA (traffic_gen line 118)
+//------------------------------------------------------------------------------
+assign tm_dsc_sts_rdy = 1'b1;
+
+
+
+top_level_simple tcp_stack (
+  .clk(axi_aclk),
+  .rst(~axi_aresetn),
+  .c2h_dsc_available(c2h_dsc_available),
+  .m_axis_h2c_tdata(m_axis_h2c_tdata),
+  .m_axis_h2c_tcrc(),
+  .m_axis_h2c_tuser_qid(m_axis_h2c_tuser_qid),
+  .m_axis_h2c_tuser_port_id(m_axis_h2c_tuser_port_id),
+  .m_axis_h2c_tuser_err(m_axis_h2c_tuser_err),
+  .m_axis_h2c_tuser_mdata(m_axis_h2c_tuser_mdata),
+  .m_axis_h2c_tuser_mty(m_axis_h2c_tuser_mty),
+  .m_axis_h2c_tuser_zero_byte(m_axis_h2c_tuser_zero_byte),
+  .m_axis_h2c_tvalid(m_axis_h2c_tvalid),
+  .m_axis_h2c_tlast(m_axis_h2c_tlast),
+  .m_axis_h2c_tready(m_axis_h2c_tready),
+
+  // C2H (TCP -> QDMA)
+  .s_axis_c2h_tdata(s_axis_c2h_tdata),
+  .s_axis_c2h_tcrc(),
+  .s_axis_c2h_ctrl_len(s_axis_c2h_ctrl_len),
+  .s_axis_c2h_ctrl_qid(),
+  .s_axis_c2h_ctrl_has_cmpt(),
+  .s_axis_c2h_ctrl_port_id(),
+
+  .s_axis_c2h_ctrl_marker(),
+  .s_axis_c2h_ctrl_ecc(),
+  .s_axis_c2h_mty(),
+
+  .s_axis_c2h_tvalid(s_axis_c2h_tvalid),
+  .s_axis_c2h_tlast(s_axis_c2h_tlast),
+  .s_axis_c2h_tready(s_axis_c2h_tready)
+);
+// traffic_gen #(.RX_LEN(C_DATA_WIDTH), .MAX_ETH_FRAME(MAX_ETH_FRAME), .TM_DSC_BITS(TM_DSC_BITS)) 
+// traffic_gen_c2h(
+//     .*,
+//     .axi_aclk(axi_aclk),
+//     .axi_aresetn(axi_aresetn),
+//     .control_reg(c2h_control),
+//     .txr_size(s_axis_c2h_ctrl_len),
+//     .timestamp(timestamp_counter),
+//     .rx_ready(s_axis_c2h_tready),
+//     .cycles_per_pkt(cycles_per_pkt),
+//     .cycles_per_pkt_2(cycles_per_pkt_2),
+//     .qid(c2h_st_qid),
+//     .num_queue(c2h_num_queue),
+//     .rx_valid(s_axis_c2h_tvalid),
+//     .rx_data(s_axis_c2h_tdata),
+//     .rx_last(s_axis_c2h_tlast),
+//     .hash_val(hash_val),
+//     .rx_qid(c2h_qid),
+//     .c2h_perform(c2h_perform),
+
+//     .tm_dsc_sts_vld    (tm_dsc_sts_vld   ),
+//     .tm_dsc_sts_qen    (tm_dsc_sts_qen   ),
+//     .tm_dsc_sts_byp    (tm_dsc_sts_byp   ),
+//     .tm_dsc_sts_dir    (tm_dsc_sts_dir   ),
+//     .tm_dsc_sts_mm     (tm_dsc_sts_mm    ),
+//     .tm_dsc_sts_error  (tm_dsc_sts_error ),
+//     .tm_dsc_sts_qid    (tm_dsc_sts_qid   ),
+//     .tm_dsc_sts_avl    (tm_dsc_sts_avl   ),
+//     .tm_dsc_sts_qinv   (tm_dsc_sts_qinv  ),
+//     .tm_dsc_sts_irq_arm(tm_dsc_sts_irq_arm),
+//     .tm_dsc_sts_rdy    (tm_dsc_sts_rdy)
 // );
 
-
-traffic_gen #(.RX_LEN(C_DATA_WIDTH), .MAX_ETH_FRAME(MAX_ETH_FRAME), .TM_DSC_BITS(TM_DSC_BITS)) 
-traffic_gen_c2h(
-    .*,
-    .axi_aclk(axi_aclk),
-    .axi_aresetn(axi_aresetn),
-    .control_reg(c2h_control),
-    .txr_size(s_axis_c2h_ctrl_len),
-    .num_pkt(c2h_num_pkt),
-    .timestamp(timestamp_counter),
-    // .credit_in(credit_in),
-    // .credit_updt(credit_updt),
-    // .credit_perpkt_in(credit_perpkt_in),
-    // .credit_needed(credit_needed),
-    .rx_ready(s_axis_c2h_tready),
-    .cycles_per_pkt(cycles_per_pkt),
-    .qid(c2h_st_qid),
-    .num_queue(c2h_num_queue),
-    .rx_valid(s_axis_c2h_tvalid),
-    // .rx_ben(s_axis_c2h_dpar),
-    .rx_data(s_axis_c2h_tdata),
-    .rx_last(s_axis_c2h_tlast),
-    .hash_val(hash_val),
-    .rx_qid(c2h_qid),
-    .c2h_perform(c2h_perform),
-
-    .tm_dsc_sts_vld    (tm_dsc_sts_vld   ),
-    .tm_dsc_sts_qen    (tm_dsc_sts_qen   ),
-    .tm_dsc_sts_byp    (tm_dsc_sts_byp   ),
-    .tm_dsc_sts_dir    (tm_dsc_sts_dir   ),
-    .tm_dsc_sts_mm     (tm_dsc_sts_mm    ),
-    .tm_dsc_sts_error  (tm_dsc_sts_error ),
-    .tm_dsc_sts_qid    (tm_dsc_sts_qid   ),
-    .tm_dsc_sts_avl    (tm_dsc_sts_avl   ),
-    .tm_dsc_sts_qinv   (tm_dsc_sts_qinv  ),
-    .tm_dsc_sts_irq_arm(tm_dsc_sts_irq_arm),
-    .tm_dsc_sts_rdy    (tm_dsc_sts_rdy)
-);
-
-  ST_h2c #(
-  .BIT_WIDTH         ( C_DATA_WIDTH ),
-  .C_H2C_TUSER_WIDTH ( C_H2C_TUSER_WIDTH )
-  )
-  ST_h2c_0 (
-  .axi_aclk    (axi_aclk),
-  .axi_aresetn (axi_aresetn),
-//  .control_reg (32'h0),
-//  .control_run (1'b0),
-//  .h2c_txr_size(32'h0),
-  .perform_begin(perform_begin),
-  .read_addr(read_addr),
-  .rd_output(rd_output),
-  .timestamp(timestamp_counter),
-  .h2c_tdata   (m_axis_h2c_tdata),
-  .h2c_tvalid  (m_axis_h2c_tvalid),
-  .h2c_tready  (m_axis_h2c_tready),
-  .h2c_tlast   (m_axis_h2c_tlast),
-  .h2c_tuser_qid (m_axis_h2c_tuser_qid),
-  .h2c_tuser_port_id (m_axis_h2c_tuser_port_id),
-  .h2c_tuser_err (m_axis_h2c_tuser_err),
-  .h2c_tuser_mdata (m_axis_h2c_tuser_mdata),
-  .h2c_tuser_mty (m_axis_h2c_tuser_mty),
-  .h2c_tuser_zero_byte (m_axis_h2c_tuser_zero_byte),
-  .h2c_count   (h2c_count),
-  .h2c_match   (h2c_match),
-  .clr_match   (clr_h2c_match)
-  );
+//   ST_h2c #(
+//   .BIT_WIDTH         ( C_DATA_WIDTH ),
+//   .C_H2C_TUSER_WIDTH ( C_H2C_TUSER_WIDTH )
+//   )
+//   ST_h2c_0 (
+//   .axi_aclk    (axi_aclk),
+//   .axi_aresetn (axi_aresetn),
+//   .perform_begin(perform_begin),
+//   .read_addr(read_addr),
+//   .rd_output(rd_output),
+//   .timestamp(timestamp_counter),
+//   .h2c_tdata   (m_axis_h2c_tdata),
+//   .h2c_tvalid  (m_axis_h2c_tvalid),
+//   .h2c_tready  (m_axis_h2c_tready),
+//   .h2c_tlast   (m_axis_h2c_tlast),
+//   .h2c_tuser_qid (m_axis_h2c_tuser_qid),
+//   .h2c_tuser_port_id (m_axis_h2c_tuser_port_id),
+//   .h2c_tuser_err (m_axis_h2c_tuser_err),
+//   .h2c_tuser_mdata (m_axis_h2c_tuser_mdata),
+//   .h2c_tuser_mty (m_axis_h2c_tuser_mty),
+//   .h2c_tuser_zero_byte (m_axis_h2c_tuser_zero_byte),
+//   .h2c_count   (h2c_count),
+//   .h2c_match   (h2c_match),
+//   .clr_match   (clr_h2c_match)
+//   );
 
    reg [C_DATA_WIDTH-1 :0]    m_axis_h2c_tdata_reg;
    reg 			      m_axis_h2c_tvalid_reg;

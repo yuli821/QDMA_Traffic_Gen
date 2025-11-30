@@ -410,7 +410,15 @@ module qdma_app #(
   output [10:0]      dsc_crdt_in_qid,
   output [15:0]      dsc_crdt_in_crdt,
 
-  output [3:0]  leds
+  output [3:0]  leds,
+
+  output [12:0] bram_addrb,
+  output bram_clkb,
+  output [31:0] bram_dinb,
+  input [31:0] bram_doutb,
+  output bram_enb,
+  output bram_rstb,
+  output [3:0] bram_web
 
 );
 
@@ -471,7 +479,6 @@ module qdma_app #(
   wire                                  out_axis_pld_tvalid;
   wire                                  out_axis_pld_tready;
 
-  wire [31:0]   c2h_num_pkt;
   wire [10:0]   c2h_st_qid;
   wire [15:0]   c2h_st_len;
   wire [31:0]   h2c_count;
@@ -484,11 +491,8 @@ module qdma_app #(
   wire [255:0]  wb_dat;
   wire [10:0] c2h_qid;
   wire [31:0]  hash_val;
+  wire [31:0] traffic_pattern;
 
-  wire [TM_DSC_BITS-1:0]   credit_out;
-  wire [31:0]   credit_needed;
-  wire [TM_DSC_BITS-1:0]   credit_perpkt_in;
-  wire                     credit_updt;
   wire [15:0]              buf_count;
 
   wire        st_loopback;
@@ -499,9 +503,56 @@ module qdma_app #(
 
   wire [31:0] cycles_per_pkt;
   wire [10:0] c2h_num_queue;
-  wire c2h_perform;
   wire [31:0] read_addr;
   wire [31:0] rd_output;
+
+  wire c2h_perform;
+  reg c2h_perform_d1;
+  wire c2h_perform_pls_r;
+  wire c2h_perform_pls_f;
+  reg [31:0] cycles_per_pkt_2;
+  reg [12:0] bram_addrb_reg;
+  reg [31:0] bram_dinb_reg;
+  reg [3:0] bram_web_reg;
+  reg [31:0] c2h_perform_pls_r_d1;
+  assign c2h_perform_pls_r = c2h_perform & ~c2h_perform_d1;
+  assign c2h_perform_pls_f = ~c2h_perform & c2h_perform_d1;
+  assign bram_clkb = user_clk;
+  assign bram_enb = 1'b1;
+  assign bram_rstb = ~rst_n;
+  assign bram_addrb = bram_addrb_reg;
+  assign bram_dinb = bram_dinb_reg;
+  assign bram_web = bram_web_reg;
+  always_ff @(posedge user_clk) begin  //write start signal, read rate
+    if (~rst_n) begin 
+      bram_addrb_reg <= '0;
+      bram_dinb_reg <= '0;
+      bram_web_reg <= '0;
+      cycles_per_pkt_2 <= '0;
+      c2h_perform_d1 <= '0;
+      c2h_perform_pls_r_d1 <= '0;
+    end else begin 
+      c2h_perform_d1 <= c2h_perform;
+      c2h_perform_pls_r_d1 <= c2h_perform_pls_r;
+      if (c2h_perform_pls_r) begin 
+        bram_addrb_reg <= 32'h8; //address is 0x4, read by PS write by PL
+        bram_dinb_reg <= {16'h0, c2h_st_len}; // packet size
+        bram_web_reg <= 4'hf;
+      end else if (c2h_perform_pls_r_d1) begin 
+        bram_addrb_reg <= 32'h4; //address is 0x4, read by PS write by PL
+        bram_dinb_reg <= {30'h0,traffic_pattern[1:0]}; //00: constant, 01: web, 10: hadoop, 11: cache, if constant, take cycles_per_pkt, otherwise, cycles_per_pkt_2
+        bram_web_reg <= 4'hf;
+      end else if (c2h_perform_pls_f) begin 
+        bram_addrb_reg <= 32'h4;
+        bram_dinb_reg <= 32'h0;
+        bram_web_reg <= 4'h1;
+      end else begin
+        bram_addrb_reg <= 32'h0; //address is 0x0, write by PS read by PL
+        bram_web_reg <= 4'h0;
+        cycles_per_pkt_2 <= bram_doutb; //1 cycle read latency 
+      end
+    end
+  end
 
   // The sys_rst_n input is active low based on the core configuration
   assign sys_resetn = sys_rst_n;
@@ -539,7 +590,7 @@ module qdma_app #(
   assign c2h_byp_in_st_sim_at = c2h_byp_in_st_csh_at;
   user_control
     #(
-      .MAX_ETH_FRAME(16'h1000),
+      //.MAX_ETH_FRAME(16'h1000),
       .C_DATA_WIDTH (C_DATA_WIDTH),
       .QID_MAX (2048),
       .PF0_M_AXILITE_ADDR_MSK( 32'h00000FFF),
@@ -596,7 +647,7 @@ module qdma_app #(
      .axi_st_c2h_ready (s_axis_c2h_tready),
      .c2h_st_qid (c2h_st_qid),
      .c2h_control (c2h_control),
-     .c2h_num_pkt (c2h_num_pkt),
+     .traffic_pattern(traffic_pattern),
      .clr_h2c_match (clr_h2c_match),
      .c2h_st_len (c2h_st_len),
      .h2c_count (h2c_count),
@@ -605,10 +656,6 @@ module qdma_app #(
      .h2c_qid (h2c_qid),
      .h2c_zero_byte (m_axis_h2c_tuser_zero_byte),
      .wb_dat (wb_dat),
-     .credit_out (credit_out),
-     .credit_updt (credit_updt),
-     .credit_perpkt_in (credit_perpkt_in),
-     .credit_needed (credit_needed),
      .buf_count (buf_count),
      .axis_c2h_drop       (axis_c2h_status_drop),
      .axis_c2h_drop_valid (axis_c2h_status_valid),
@@ -774,9 +821,11 @@ module qdma_app #(
     .TM_DSC_BITS       ( TM_DSC_BITS )
     )
   axi_st_module_i
-    (
-      .rd_output(rd_output),
-      .read_addr(read_addr),
+  (
+    .traffic_pattern(traffic_pattern),
+    .cycles_per_pkt_2(cycles_per_pkt_2),
+    .rd_output(rd_output),
+    .read_addr(read_addr),
     .c2h_perform(c2h_perform),
     .c2h_num_queue(c2h_num_queue),
     .cycles_per_pkt(cycles_per_pkt),
@@ -786,17 +835,12 @@ module qdma_app #(
     .c2h_control (c2h_control),
     .clr_h2c_match (clr_h2c_match),
     .c2h_st_len (c2h_st_len),
-    .c2h_num_pkt (c2h_num_pkt),
     .h2c_count (h2c_count),
     .h2c_match (h2c_match),
     .h2c_crc_match   ( h2c_crc_match ),
     .h2c_qid (h2c_qid),
     .wb_dat (wb_dat),
     .cmpt_size (cmpt_size),
-    .credit_in (credit_out),
-    .credit_updt (credit_updt),
-    .credit_perpkt_in (credit_perpkt_in),
-    .credit_needed (credit_needed),
     .buf_count (buf_count),
     .byp_to_cmp (byp_to_cmp),
     .byp_data_to_cmp (byp_data_to_cmp),
@@ -839,16 +883,16 @@ module qdma_app #(
     .hash_val(hash_val),
 
     .tm_dsc_sts_vld    (tm_dsc_sts_vld   ),
-     .tm_dsc_sts_qen    (tm_dsc_sts_qen   ),
-     .tm_dsc_sts_byp    (tm_dsc_sts_byp   ),
-     .tm_dsc_sts_dir    (tm_dsc_sts_dir   ),
-     .tm_dsc_sts_mm     (tm_dsc_sts_mm    ),
-     .tm_dsc_sts_error  (tm_dsc_sts_error ),
-     .tm_dsc_sts_qid    (tm_dsc_sts_qid   ),
-     .tm_dsc_sts_avl    (tm_dsc_sts_avl   ),
-     .tm_dsc_sts_qinv   (tm_dsc_sts_qinv  ),
-     .tm_dsc_sts_irq_arm(tm_dsc_sts_irq_arm),
-     .tm_dsc_sts_rdy    (tm_dsc_sts_rdy)
+    .tm_dsc_sts_qen    (tm_dsc_sts_qen   ),
+    .tm_dsc_sts_byp    (tm_dsc_sts_byp   ),
+    .tm_dsc_sts_dir    (tm_dsc_sts_dir   ),
+    .tm_dsc_sts_mm     (tm_dsc_sts_mm    ),
+    .tm_dsc_sts_error  (tm_dsc_sts_error ),
+    .tm_dsc_sts_qid    (tm_dsc_sts_qid   ),
+    .tm_dsc_sts_avl    (tm_dsc_sts_avl   ),
+    .tm_dsc_sts_qinv   (tm_dsc_sts_qinv  ),
+    .tm_dsc_sts_irq_arm(tm_dsc_sts_irq_arm),
+    .tm_dsc_sts_rdy    (tm_dsc_sts_rdy)
   );
 
   // LEDs for observation
