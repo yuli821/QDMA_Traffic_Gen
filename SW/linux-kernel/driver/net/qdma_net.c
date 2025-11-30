@@ -26,10 +26,6 @@
 #include <linux/etherdevice.h>
 
 #include "qdma_net.h"
-#include "../libqdma/libqdma_export.h"
-#include "../libqdma/qdma_ul_ext.h"
-#include "../libqdma/xdev.h"
-#include "../src/qdma_mod.h"
 
 char qdma_net_driver_name[] = "qdma_net";
 char qdma_net_driver_string[] = "QDMA Network Driver";
@@ -122,6 +118,16 @@ static int qdma_net_up(struct qdma_net_priv *priv);
 static void qdma_net_down(struct qdma_net_priv *priv);
 static void qdma_net_reset(struct qdma_net_priv *priv);
 
+/* Memory Pool Management Functions */
+int qdma_net_mempool_create(struct qdma_net_mempool *mpool,
+                                    unsigned int entry_size,
+                                    unsigned int max_entries);
+void qdma_net_mempool_destroy(struct qdma_net_mempool *mpool);
+void *qdma_net_mempool_alloc(struct qdma_net_mempool *mpool,
+                                    unsigned int num_blks);
+void qdma_net_mempool_free(struct qdma_net_mempool *mpool,
+                                    void *memptr);
+
 /* ============================================================================
  * NETWORK DEVICE OPERATIONS STRUCTURE
  * ============================================================================ */
@@ -162,6 +168,123 @@ static const struct ethtool_ops qdma_net_ethtool_ops = {
 };
 
 /* ============================================================================
+ * MEMORY POOL MANAGEMENT FUNCTIONS
+ * ============================================================================ */
+
+/**
+ * qdma_net_mempool_create - Create a memory pool
+ * @mpool: memory pool structure
+ * @entry_size: size of each entry
+ * @max_entries: maximum number of entries
+ *
+ * Returns 0 on success, negative on failure
+ */
+int qdma_net_mempool_create(struct qdma_net_mempool *mpool,
+                                    unsigned int entry_size,
+                                    unsigned int max_entries)
+{
+	size_t total_size;
+	/* entries + metadata */
+	total_size = max_entries * (entry_size + sizeof(struct qdma_net_meminfo));
+	mpool->mempool = kmalloc(total_size, GFP_KERNEL);
+	if (!mpool->mempool) {
+		pr_err("OOM: Failed to allocate mempool\n");
+		return -ENOMEM;
+	}
+	/* Metadata follows the data blocks */
+	mpool->mempool_info = (struct qdma_net_meminfo *)((char *)mpool->mempool + (max_entries * entry_size));
+	mpool->mempool_blksz = entry_size;
+	mpool->total_memblks = max_entries;
+	mpool->mempool_blkidx = 0;
+
+	/* Initialize metadata */
+	memset(mpool->mempool_info, 0, max_entries * sizeof(struct qdma_net_meminfo));
+	return 0;
+}
+
+/**
+ * qdma_net_mempool_destroy - Destroy a memory pool
+ * @mpool: memory pool structure
+*/
+void qdma_net_mempool_destroy(struct qdma_net_mempool *mpool)
+{
+	if (mpool->mempool) {
+		kfree(mpool->mempool);
+		mpool->mempool = NULL;
+	}
+}
+
+/**
+ * qdma_net_mempool_alloc - Allocate memory from a memory pool
+ * @mpool: memory pool structure
+ * @num_blks: number of blocks to allocate
+ *
+ * Returns a pointer to the allocated memory, or NULL on failure
+*/
+void *qdma_net_mempool_alloc(struct qdma_net_mempool *mpool,
+                                    unsigned int num_blks)
+{
+	unsigned int tmp_blkidx = mpool->mempool_blkidx;
+	unsigned int max_blkcnt = tmp_blkidx + num_blks;
+	unsigned int i, avail = 0;
+	void *memptr = NULL;
+	struct qdma_net_meminfo *meminfo = mpool->mempool_info;
+
+	if (max_blkcnt > mpool->total_memblks) {
+		tmp_blkidx = 0;
+		max_blkcnt = num_blks;
+	}
+	/* Find continuous free blocks */
+	for (i = tmp_blkidx; (i < mpool->total_memblks) && (i < max_blkcnt); i++) {
+		if (meminfo[i].memptr) {
+			i += meminfo[i].num_blks - 1;
+			max_blkcnt = i + num_blks + 1;
+			avail = 0;
+			tmp_blkidx = i + 1;
+		} else {
+			avail++;
+		}
+		if (max_blkcnt > mpool->total_memblks) {
+			if (num_blks > mpool->mempool_blkidx) return NULL;
+			i = 0;
+			avail = 0;
+			max_blkcnt = num_blks;
+			tmp_blkidx = 0;
+		}
+		if (avail == num_blks) {
+			meminfo[tmp_blkidx].memptr = &meminfo[tmp_blkidx];
+			meminfo[tmp_blkidx].num_blks = num_blks;
+			mpool->mempool_blkidx = i + 1;
+			memptr = (char *)mpool->mempool + (tmp_blkidx * mpool->mempool_blksz);
+			break;
+		}
+	}
+	return memptr;
+}
+
+/**
+ * qdma_net_mempool_free - Free memory from a memory pool
+ * @mpool: memory pool structure
+ * @memptr: pointer to the memory to free
+ *
+ * Returns 0 on success, negative on failure
+*/
+void qdma_net_mempool_free(struct qdma_net_mempool *mpool,
+                                    void *memptr)
+{
+	struct qdma_net_meminfo *meminfo = mpool->mempool_info;
+	unsigned int idx;
+	if (!memptr) return;
+	idx = ((char *)memptr - (char *)mpool->mempool) / mpool->mempool_blksz;
+	if (idx >= mpool->total_memblks) {
+		pr_err("mempool_free: invalid index %u (max %u)\n", idx, mpool->total_memblks);
+		return;
+	}
+	meminfo[idx].num_blks = 0;
+	meminfo[idx].memptr = NULL;
+}
+
+/* ============================================================================
  * HARDWARE ACCESS FUNCTIONS
  * ============================================================================ */
 
@@ -173,26 +296,26 @@ static const struct ethtool_ops qdma_net_ethtool_ops = {
  */
 static int qdma_net_hw_read_mac_addr(struct qdma_net_priv *priv)
 {
-	u32 val;
-	int rv;
+    u32 val;
+    int rv;
     u8 mac[ETH_ALEN];
 
 	/* Read MAC address from hardware registers */
 	rv = qdma_device_read_user_register(priv->xpdev, QDMA_NET_MAC_LO, &val);
-	if (rv < 0) {
+    if (rv < 0) {
 		netdev_err(priv->ndev, "Failed to read MAC_LO: %d\n", rv);
-		return rv;
-	}
+        return rv;
+    }
 	mac[2] = (val >> 24) & 0xFF;
 	mac[3] = (val >> 16) & 0xFF;
 	mac[4] = (val >> 8) & 0xFF;
 	mac[5] = (val >> 0) & 0xFF;
 
 	rv = qdma_device_read_user_register(priv->xpdev, QDMA_NET_MAC_HI, &val);
-	if (rv < 0) {
+    if (rv < 0) {
 		netdev_err(priv->ndev, "Failed to read MAC_HI: %d\n", rv);
-		return rv;
-	}
+        return rv;
+    }
 	mac[0] = (val >> 8) & 0xFF;
 	mac[1] = (val >> 0) & 0xFF;
 
@@ -225,7 +348,7 @@ static int qdma_net_hw_init(struct qdma_net_priv *priv)
 {
 	netdev_dbg(priv->ndev, "Hardware init (placeholder)\n");
 	/* TODO: Implement hardware initialization if needed */
-	return 0;
+    return 0;
 }
 
 /**
@@ -254,25 +377,25 @@ static void qdma_net_hw_setup_link(struct qdma_net_priv *priv)
  */
 static void qdma_net_hw_get_link_status(struct qdma_net_priv *priv)
 {
-	u32 link_status;
-	int rv;
-	bool link_up;
+    u32 link_status;
+    int rv;
+    bool link_up;
 
-	rv = qdma_device_read_user_register(priv->xpdev, QDMA_NET_LINK_STATUS,
-	                                     &link_status);
-	if (rv < 0) {
+    rv = qdma_device_read_user_register(priv->xpdev, QDMA_NET_LINK_STATUS,
+                                         &link_status);
+    if (rv < 0) {
 		netdev_dbg(priv->ndev, "Failed to read link status: %d\n", rv);
 		return;
-	}
+    }
 
-	link_up = !!(link_status & QDMA_NET_LINK_UP);
+    link_up = !!(link_status & QDMA_NET_LINK_UP);
 
 	if (link_up != netif_carrier_ok(priv->ndev)) {
-		if (link_up) {
-			netif_carrier_on(priv->ndev);
+        if (link_up) {
+            netif_carrier_on(priv->ndev);
 			netdev_info(priv->ndev, "NIC Link is Up\n");
-		} else {
-			netif_carrier_off(priv->ndev);
+        } else {
+            netif_carrier_off(priv->ndev);
 			netdev_info(priv->ndev, "NIC Link is Down\n");
 		}
 	}
@@ -298,29 +421,101 @@ static int qdma_net_setup_tx_resources(struct qdma_net_priv *priv,
 
 	netdev_dbg(priv->ndev, "Setting up TX queue %u\n", txq->qid);
 
+	/* Create TX context memory pool */
+	rv = qdma_net_mempool_create(&txq->tx_ctx_pool, sizeof(struct qdma_net_tx_context),
+									QDMA_NET_TX_CTX_POOL_SIZE);
+	if (rv < 0) {
+		netdev_err(priv->ndev, "Failed to create TX context memory pool: %d\n", rv);
+		return rv;
+	}
+
 	memset(&qconf, 0, sizeof(qconf));
 
 	/* TX: ST H2C Queue Configuration */
 	qconf.st = 1;  /* Streaming mode */
 	qconf.q_type = Q_H2C;
 	qconf.qidx = txq->qid;
-	qconf.desc_rng_sz_idx = 0;  /* Ring size index */
+	qconf.desc_rng_sz_idx = 9;  /* Ring size index */
 	qconf.pidx_acc = 8;
 
-	rv = qdma_queue_add(priv->xpdev->dev_hndl, &qconf, &txq->h2c_qhndl, err_buf, sizeof(err_buf));
+	/* Critical flags from dmaperf.c */
+	qconf.wb_status_en = 1;      /* Enable completion status */
+	qconf.cmpl_status_acc_en = 1;  /* Enable completion status accumulation */
+	qconf.cmpl_status_pend_chk = 1; /* Enable pending check */
+	qconf.fetch_credit = 0;        /* Enable fetch credit */
+	qconf.cmpl_stat_en = 1; /* Enable descriptor completion status */
+
+	netdev_info(priv->ndev, "Adding H2C queue: qidx=%u, st=%d, type=%d\n",
+		qconf.qidx, qconf.st, qconf.q_type);
+
+	/* OLD CODE - direct qdma_queue_add (queue not visible to dma-ctl):
+	 * rv = qdma_queue_add(priv->xpdev->dev_hndl, &qconf, &txq->h2c_qhndl, err_buf, sizeof(err_buf));
+	 * if (rv < 0) {
+	 *     netdev_err(priv->ndev, "Failed to add H2C queue: %d\n", rv);
+	 *     qdma_net_mempool_destroy(&txq->tx_ctx_pool);
+	 *     return rv;
+	 * }
+	 */
+
+	/* NEW CODE - use xpdev_queue_add to properly register queue */
+	rv = xpdev_queue_add(priv->xpdev, &qconf, err_buf, sizeof(err_buf));
 	if (rv < 0) {
-		netdev_err(priv->ndev, "Failed to add H2C queue: %d\n", rv);
+		netdev_err(priv->ndev, "Failed to add H2C queue via xpdev: %d, err: %s\n", rv, err_buf);
+		qdma_net_mempool_destroy(&txq->tx_ctx_pool);
 		return rv;
 	}
 
+	/* Get the queue handle from xpdev's qdata */
+	{
+		struct xlnx_qdata *qdata = xpdev_queue_get(priv->xpdev, qconf.qidx, Q_H2C, 1, err_buf, sizeof(err_buf));
+		if (!qdata) {
+			netdev_err(priv->ndev, "Failed to get qdata for H2C queue: %s\n", err_buf);
+			qdma_net_mempool_destroy(&txq->tx_ctx_pool);
+			return -EINVAL;
+		}
+		txq->h2c_qhndl = qdata->qhndl;
+	}
+
+	netdev_info(priv->ndev, "H2C queue added successfully via xpdev, qhndl=0x%lx\n", txq->h2c_qhndl);
+
+	/* ADD THIS - Apply queue configuration BEFORE starting (like dma-ctl does) */
+	rv = qdma_queue_config(priv->xpdev->dev_hndl, txq->h2c_qhndl, &qconf, err_buf, sizeof(err_buf));
+	if (rv < 0) {
+		netdev_err(priv->ndev, "Failed to config H2C queue: %d, err: %s\n", rv, err_buf);
+		xpdev_queue_delete(priv->xpdev, qconf.qidx, Q_H2C, err_buf, sizeof(err_buf));
+		qdma_net_mempool_destroy(&txq->tx_ctx_pool);
+		return rv;
+	}
+	netdev_info(priv->ndev, "H2C queue configured successfully\n");
+
+	/* OLD CODE - direct qdma_queue_start:
+	 * rv = qdma_queue_start(priv->xpdev->dev_hndl, txq->h2c_qhndl, err_buf, sizeof(err_buf));
+	 */
+	
+	/* NEW CODE - queue start (same API, but queue is now properly registered) */
 	rv = qdma_queue_start(priv->xpdev->dev_hndl, txq->h2c_qhndl, err_buf, sizeof(err_buf));
 	if (rv < 0) {
-		netdev_err(priv->ndev, "Failed to start H2C queue: %d\n", rv);
-		qdma_queue_remove(priv->xpdev->dev_hndl, txq->h2c_qhndl, err_buf, sizeof(err_buf));
+		netdev_err(priv->ndev, "Failed to start H2C queue: %d, err_buf: %s\n", rv, err_buf);
+		xpdev_queue_delete(priv->xpdev, qconf.qidx, Q_H2C, err_buf, sizeof(err_buf));
+		qdma_net_mempool_destroy(&txq->tx_ctx_pool);
 		return rv;
 	}
 
-	netdev_dbg(priv->ndev, "TX queue %u setup complete\n", txq->qid);
+	/* Verify queue state after start */
+	{
+		struct qdma_q_state q_state;
+		char state_buf[100];
+		int state_rv = qdma_get_queue_state(priv->xpdev->dev_hndl, txq->h2c_qhndl, 
+						    &q_state, state_buf, sizeof(state_buf));
+		if (state_rv >= 0) {
+			netdev_info(priv->ndev, "TX queue %u state after start: qstate=%d, q_type=%d, st=%d\n",
+				txq->qid, q_state.qstate, q_state.q_type, q_state.st);
+		} else {
+			netdev_warn(priv->ndev, "Failed to get TX queue state: %d\n", state_rv);
+		}
+	}
+
+	netdev_info(priv->ndev, "TX queue %u setup complete, qhndl=0x%lx\n", txq->qid, txq->h2c_qhndl);
 	return 0;
 }
 
@@ -357,20 +552,35 @@ static int qdma_net_setup_rx_resources(struct qdma_net_priv *priv,
 	qconf.quld = (unsigned long)rxq;  /* User data for callback */
 	qconf.fp_descq_c2h_packet = qdma_net_rx_packet_cb;
 
-	rv = qdma_queue_add(priv->xpdev->dev_hndl, &qconf, &rxq->c2h_qhndl, err_buf, sizeof(err_buf));
+	/* OLD CODE - direct qdma_queue_add:
+	 * rv = qdma_queue_add(priv->xpdev->dev_hndl, &qconf, &rxq->c2h_qhndl, err_buf, sizeof(err_buf));
+	 */
+	/* NEW CODE - use xpdev_queue_add to properly register queue */
+	rv = xpdev_queue_add(priv->xpdev, &qconf, err_buf, sizeof(err_buf));
 	if (rv < 0) {
-		netdev_err(priv->ndev, "Failed to add C2H queue: %d\n", rv);
+		netdev_err(priv->ndev, "Failed to add C2H queue via xpdev: %d, err: %s\n", rv, err_buf);
 		return rv;
+	}
+
+	/* Get the queue handle from xpdev's qdata */
+	{
+		struct xlnx_qdata *qdata = xpdev_queue_get(priv->xpdev, qconf.qidx, Q_C2H, 1, err_buf, sizeof(err_buf));
+		if (!qdata) {
+			netdev_err(priv->ndev, "Failed to get qdata for C2H queue: %s\n", err_buf);
+			return -EINVAL;
+		}
+		rxq->c2h_qhndl = qdata->qhndl;
 	}
 
 	rv = qdma_queue_start(priv->xpdev->dev_hndl, rxq->c2h_qhndl, err_buf, sizeof(err_buf));
 	if (rv < 0) {
 		netdev_err(priv->ndev, "Failed to start C2H queue: %d\n", rv);
-		qdma_queue_remove(priv->xpdev->dev_hndl, rxq->c2h_qhndl, err_buf, sizeof(err_buf));
+		/* OLD CODE: qdma_queue_remove(priv->xpdev->dev_hndl, rxq->c2h_qhndl, err_buf, sizeof(err_buf)); */
+		xpdev_queue_delete(priv->xpdev, qconf.qidx, Q_C2H, err_buf, sizeof(err_buf));
 		return rv;
 	}
 
-	netdev_dbg(priv->ndev, "RX queue %u setup complete\n", rxq->qid);
+	netdev_dbg(priv->ndev, "RX queue %u setup complete, qhndl=0x%lx\n", rxq->qid, rxq->c2h_qhndl);
 	return 0;
 }
 
@@ -382,13 +592,21 @@ static int qdma_net_setup_rx_resources(struct qdma_net_priv *priv,
 static void qdma_net_free_tx_resources(struct qdma_net_priv *priv,
                                         struct qdma_net_queue *txq)
 {
+	char err_buf[100];
+
 	netdev_dbg(priv->ndev, "Freeing TX queue %u\n", txq->qid);
 
 	if (txq->h2c_qhndl) {
-		qdma_queue_stop(priv->xpdev->dev_hndl, txq->h2c_qhndl, NULL, 0);
-		qdma_queue_remove(priv->xpdev->dev_hndl, txq->h2c_qhndl, NULL, 0);
+		qdma_queue_stop(priv->xpdev->dev_hndl, txq->h2c_qhndl, err_buf, sizeof(err_buf));
+		/* OLD CODE - direct qdma_queue_remove:
+		 * qdma_queue_remove(priv->xpdev->dev_hndl, txq->h2c_qhndl, err_buf, sizeof(err_buf));
+		 */
+		/* NEW CODE - use xpdev_queue_delete to properly unregister queue */
+		xpdev_queue_delete(priv->xpdev, txq->qid, Q_H2C, err_buf, sizeof(err_buf));
 		txq->h2c_qhndl = 0;
 	}
+
+	qdma_net_mempool_destroy(&txq->tx_ctx_pool);
 }
 
 /**
@@ -399,11 +617,15 @@ static void qdma_net_free_tx_resources(struct qdma_net_priv *priv,
 static void qdma_net_free_rx_resources(struct qdma_net_priv *priv,
                                         struct qdma_net_queue *rxq)
 {
+	char err_buf[100];
+
 	netdev_dbg(priv->ndev, "Freeing RX queue %u\n", rxq->qid);
 
 	if (rxq->c2h_qhndl) {
-		qdma_queue_stop(priv->xpdev->dev_hndl, rxq->c2h_qhndl, NULL, 0);
-		qdma_queue_remove(priv->xpdev->dev_hndl, rxq->c2h_qhndl, NULL, 0);
+		qdma_queue_stop(priv->xpdev->dev_hndl, rxq->c2h_qhndl, err_buf, sizeof(err_buf));
+		/* OLD CODE: qdma_queue_remove(priv->xpdev->dev_hndl, rxq->c2h_qhndl, NULL, 0); */
+		/* NEW CODE - use xpdev_queue_delete to properly unregister queue */
+		xpdev_queue_delete(priv->xpdev, rxq->qid, Q_C2H, err_buf, sizeof(err_buf));
 		rxq->c2h_qhndl = 0;
 	}
 }
@@ -604,7 +826,7 @@ static int qdma_net_up(struct qdma_net_priv *priv)
 {
 	int err;
 
-	netdev_dbg(priv->ndev, "Bringing device up\n");
+	netdev_info(priv->ndev, "Bringing device up\n");
 
 	/* Configure hardware */
 	qdma_net_hw_configure(priv);
@@ -701,6 +923,14 @@ static int qdma_net_open(struct net_device *netdev)
 
 	netdev_info(netdev, "Opening network interface\n");
 
+	/* DIAGNOSTIC: Validate device handle */
+	if (!priv->xpdev || !priv->xpdev->dev_hndl) {
+		netdev_err(netdev, "Device handle is NULL! Cannot open interface.\n");
+		return -EINVAL;
+	}
+
+	netdev_info(netdev, "Device handle: 0x%lx\n", priv->xpdev->dev_hndl);
+
 	/* Bring device up */
 	err = qdma_net_up(priv);
 	if (err)
@@ -708,8 +938,8 @@ static int qdma_net_open(struct net_device *netdev)
 
 	/* Start TX queue */
 	netif_tx_start_all_queues(netdev);
-
-	return 0;
+    
+    return 0;
 }
 
 /**
@@ -729,8 +959,8 @@ static int qdma_net_close(struct net_device *netdev)
 
 	/* Bring device down */
 	qdma_net_down(priv);
-
-	return 0;
+    
+    return 0;
 }
 
 /**
@@ -747,6 +977,25 @@ static netdev_tx_t qdma_net_xmit_frame(struct sk_buff *skb,
 	struct qdma_net_queue *txq = &priv->qs[0];  /* Use first queue */
 	int err;
 
+	dev_info(&netdev->dev, "Start TX frames");
+
+	/* DIAGNOSTIC: Check if interface is up */
+	if (!netif_running(netdev)) {
+		dev_err(&netdev->dev, "Interface not running!\n");
+		dev_kfree_skb_any(skb);
+		return NETDEV_TX_OK;
+	}
+
+	/* DIAGNOSTIC: Validate queue handle */
+	if (txq->h2c_qhndl == QDMA_QUEUE_IDX_INVALID) {
+		dev_err(&netdev->dev, "TX queue handle is invalid! Queue ID=%u\n", txq->qid);
+		priv->stats.tx_dropped++;
+		dev_kfree_skb_any(skb);
+		return NETDEV_TX_OK;
+	}
+
+	dev_info(&netdev->dev, "TX frame: len=%u, qhndl=0x%lx\n", skb->len, txq->h2c_qhndl);
+
 	/* Transmit packet via QDMA */
 	err = qdma_net_tx_enqueue_skb(priv, txq, skb);
 	if (err) {
@@ -754,9 +1003,9 @@ static netdev_tx_t qdma_net_xmit_frame(struct sk_buff *skb,
 		dev_kfree_skb_any(skb);
 		return NETDEV_TX_OK;
 	}
-
+    
 	/* SKB will be freed by completion callback */
-	return NETDEV_TX_OK;
+    return NETDEV_TX_OK;
 }
 
 /**
@@ -796,8 +1045,6 @@ static void qdma_net_get_stats64(struct net_device *netdev,
  */
 static void qdma_net_set_rx_mode(struct net_device *netdev)
 {
-	//struct qdma_net_priv *priv = netdev_priv(netdev);
-
 	netdev_dbg(netdev, "Set RX mode (placeholder)\n");
 	/* TODO: Configure multicast filter, promiscuous mode */
 }
@@ -811,7 +1058,6 @@ static void qdma_net_set_rx_mode(struct net_device *netdev)
  */
 static int qdma_net_set_mac(struct net_device *netdev, void *p)
 {
-	//struct qdma_net_priv *priv = netdev_priv(netdev);
 	struct sockaddr *addr = p;
 
 	if (!is_valid_ether_addr(addr->sa_data))
@@ -834,8 +1080,6 @@ static int qdma_net_set_mac(struct net_device *netdev, void *p)
  */
 static int qdma_net_change_mtu(struct net_device *netdev, int new_mtu)
 {
-	//struct qdma_net_priv *priv = netdev_priv(netdev);
-
 	netdev_info(netdev, "Changing MTU from %d to %d\n", netdev->mtu, new_mtu);
 
 	netdev->mtu = new_mtu;
@@ -952,8 +1196,6 @@ static void qdma_net_get_ringparam(struct net_device *netdev,
                                     struct kernel_ethtool_ringparam *kernel_ring,
                                     struct netlink_ext_ack *extack)
 {
-	//struct qdma_net_priv *priv = netdev_priv(netdev);
-
 	/* Report current ring sizes - placeholder values */
 	ring->rx_max_pending = 4096;
 	ring->tx_max_pending = 4096;
@@ -1126,29 +1368,29 @@ int qdma_net_register(struct pci_dev *pdev, struct xlnx_dma_dev *xdev,
                        struct xlnx_pci_dev *xpdev)
 {
 	struct net_device *netdev;
-	struct qdma_net_priv *priv;
+    struct qdma_net_priv *priv;
 	int i, err;
 
 	netdev_info(NULL, "Registering QDMA network device\n");
 
-	/* Allocate network device */
+    /* Allocate network device */
 	netdev = alloc_etherdev_mq(sizeof(struct qdma_net_priv),
 	                            QDMA_NET_TXQ_CNT);
 	if (!netdev) {
 		dev_err(&pdev->dev, "Failed to allocate netdev\n");
-		return -ENOMEM;
-	}
+        return -ENOMEM;
+    }
 
 	SET_NETDEV_DEV(netdev, &pdev->dev);
 
 	priv = netdev_priv(netdev);
 	priv->ndev = netdev;
-	priv->pdev = pdev;
-	priv->xdev = xdev;
+    priv->pdev = pdev;
+    priv->xdev = xdev;
 	priv->xpdev = xpdev;
 	priv->msg_enable = netif_msg_init(-1, QDMA_NET_DEFAULT_MSG_ENABLE);
-	priv->num_txq = QDMA_NET_TXQ_CNT;
-	priv->num_rxq = QDMA_NET_RXQ_CNT;
+    priv->num_txq = QDMA_NET_TXQ_CNT;
+    priv->num_rxq = QDMA_NET_RXQ_CNT;
 
 	/* Allocate queue structures */
 	priv->qs = devm_kcalloc(&pdev->dev, priv->num_txq,
@@ -1174,8 +1416,8 @@ int qdma_net_register(struct pci_dev *pdev, struct xlnx_dma_dev *xdev,
 	/* Set features */
 	netdev->features = NETIF_F_SG | NETIF_F_HIGHDMA;
 	netdev->hw_features = netdev->features;
-
-	/* Set MTU limits */
+    
+    /* Set MTU limits */
 	netdev->min_mtu = ETH_MIN_MTU;
 	netdev->max_mtu = ETH_DATA_LEN;  /* 1500 */
 
@@ -1207,7 +1449,7 @@ int qdma_net_register(struct pci_dev *pdev, struct xlnx_dma_dev *xdev,
 	/* Initial carrier off */
 	netif_carrier_off(netdev);
 
-	/* Register network device */
+    /* Register network device */
 	err = register_netdev(netdev);
 	if (err) {
 		dev_err(&pdev->dev, "Failed to register netdev: %d\n", err);
@@ -1222,7 +1464,7 @@ int qdma_net_register(struct pci_dev *pdev, struct xlnx_dma_dev *xdev,
 	netdev_info(netdev, "Driver: %s Version: %s\n",
 	            qdma_net_driver_string, qdma_net_driver_version);
 
-	return 0;
+    return 0;
 
 err_register:
 err_hw_init:
@@ -1240,11 +1482,11 @@ err_alloc_queues:
 void qdma_net_unregister(struct xlnx_pci_dev *xpdev)
 {
 	struct net_device *netdev;
-	struct qdma_net_priv *priv;
+    struct qdma_net_priv *priv;
 	int i;
 
 	if (!xpdev || !xpdev->ndev)
-		return;
+        return;
 
 	netdev = xpdev->ndev;
 	priv = netdev_priv(netdev);
@@ -1266,7 +1508,7 @@ void qdma_net_unregister(struct xlnx_pci_dev *xpdev)
 	free_netdev(netdev);
 
 	xpdev->ndev = NULL;
-
-	pr_info("QDMA network device unregistered\n");
+    
+    pr_info("QDMA network device unregistered\n");
 }
 

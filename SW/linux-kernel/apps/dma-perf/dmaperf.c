@@ -2191,14 +2191,15 @@ static void dump_result(unsigned long long total_io_sz)
 	unsigned long long kil_div = ((unsigned long long)tsecs * 1000);
 	unsigned long long byt_div = ((unsigned long long)tsecs);
 
-	if ((total_io_sz/gig_div)) {
-		printf("BW = %f Gbps\n", ((double)total_io_sz/gig_div) * 8.0);
-	} else if ((total_io_sz/meg_div)) {
-		printf("BW = %f Mbps\n", ((double)total_io_sz/meg_div) * 8.0);
-	} else if ((total_io_sz/kil_div)) {
-		printf("BW = %f Kbps\n", ((double)total_io_sz/kil_div) * 8.0);
-	} else
-		printf("BW = %f Bits/sec\n", ((double)total_io_sz/byt_div) * 8.0);
+	// if ((total_io_sz/gig_div)) {
+	printf("BW = %f Gbps\n", ((double)total_io_sz/gig_div) * 8.0);
+	// } 
+// 	else if ((total_io_sz/meg_div)) {
+// 		printf("BW = %f Mbps\n", ((double)total_io_sz/meg_div) * 8.0);
+// 	} else if ((total_io_sz/kil_div)) {
+// 		printf("BW = %f Kbps\n", ((double)total_io_sz/kil_div) * 8.0);
+// 	} else
+// 		printf("BW = %f Bits/sec\n", ((double)total_io_sz/byt_div) * 8.0);
 }
 
 static int is_valid_fd(int fd)

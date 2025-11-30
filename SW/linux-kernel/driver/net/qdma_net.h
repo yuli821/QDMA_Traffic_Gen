@@ -8,6 +8,8 @@
 
 #include "../libqdma/libqdma_export.h"
 #include "../libqdma/qdma_ul_ext.h"
+#include "../libqdma/xdev.h"
+#include "../src/qdma_mod.h"
 
 /* Queue Configuration */
 #define QDMA_NET_TXQ_CNT            1
@@ -24,6 +26,31 @@
 
 /* Link status bits */
 #define QDMA_NET_LINK_UP            BIT(0)
+
+#define QDMA_NET_TX_RING_SIZE 512
+#define QDMA_NET_RX_RING_SIZE 512
+#define QDMA_NET_TX_CTX_POOL_SIZE 2048 // Number of pre-allocated TX contexts
+
+struct qdma_net_meminfo {
+	void *memptr;
+	unsigned int num_blks;
+};
+
+struct qdma_net_mempool {
+	void *mempool;
+	unsigned int mempool_blkidx;
+	unsigned int mempool_blksz;
+	unsigned int total_memblks;
+	struct qdma_net_meminfo *mempool_info;
+};
+
+/* TX context structure */
+struct qdma_net_tx_context {
+	struct qdma_request req;
+	struct qdma_sw_sg sgl[MAX_SKB_FRAGS + 1];
+	struct sk_buff *skb;
+	struct qdma_net_queue *q;
+};
 
 /**
  * struct qdma_net_queue - Per-queue data structure
@@ -42,6 +69,8 @@ struct qdma_net_queue {
 	struct napi_struct napi;
 	u16 qid;
 	struct qdma_net_priv *priv;
+
+	struct qdma_net_mempool tx_ctx_pool;
 };
 
 /**
@@ -97,5 +126,15 @@ int qdma_net_rx_packet_cb(unsigned long qhndl, unsigned long quld,
 int qdma_net_tx_enqueue_skb(struct qdma_net_priv *priv,
                              struct qdma_net_queue *q,
                              struct sk_buff *skb);
+
+/* Memory Pool Management Functions */
+int qdma_net_mempool_create(struct qdma_net_mempool *mpool,
+	unsigned int entry_size,
+	unsigned int max_entries);
+void qdma_net_mempool_destroy(struct qdma_net_mempool *mpool);
+void *qdma_net_mempool_alloc(struct qdma_net_mempool *mpool,
+	unsigned int num_blks);
+void qdma_net_mempool_free(struct qdma_net_mempool *mpool,
+	void *memptr);
 
 #endif /* __QDMA_NET_H__ */

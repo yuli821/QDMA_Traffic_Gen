@@ -18,6 +18,7 @@ QDMA IP setting: <br>
 
 ## Software setup:
 
+DPDK setup:<br>
 <p>Github: Xillinx/dma_ip_drivers/QDMA/DPDK.<br>
 1. Following the tutorial until step 4, Compile Test application;<br>
 2. Replace the example/qdma_testapp with SW/qdma_testapp, cd example/qdma_testapp;<br>
