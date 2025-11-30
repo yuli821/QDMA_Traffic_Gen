@@ -1,53 +1,53 @@
-/*
- * This file is part of the QDMA userspace application
- * to enable the user to execute the QDMA functionality
- *
- * Copyright (c) 2018-2022, Xilinx, Inc. All rights reserved.
- * Copyright (c) 2022-2024, Advanced Micro Devices, Inc. All rights reserved.
- *
- * This source code is licensed under BSD-style license (found in the
- * LICENSE file in the root directory of this source tree)
- */
-#define _GNU_SOURCE
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <sys/shm.h>
-#include <fcntl.h>
-#include <stdbool.h>
-#include <linux/types.h>
-#include <getopt.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-#include <stddef.h>
-#include <ctype.h>
-#include <errno.h>
-#include <error.h>
-#include <sys/stat.h>
-#include <sys/mman.h>
-#include <sys/time.h>
-#include <sys/ioctl.h>
-#include <sys/sysinfo.h>
-// #include <linux/ktime.h>
-//#include <linux/time64.h>
-//added
-#include <stdatomic.h>
-#include <sched.h>
-#include <pthread.h>
-#include <time.h>
-#include <signal.h>
+// /*
+//  * This file is part of the QDMA userspace application
+//  * to enable the user to execute the QDMA functionality
+//  *
+//  * Copyright (c) 2018-2022, Xilinx, Inc. All rights reserved.
+//  * Copyright (c) 2022-2024, Advanced Micro Devices, Inc. All rights reserved.
+//  *
+//  * This source code is licensed under BSD-style license (found in the
+//  * LICENSE file in the root directory of this source tree)
+//  */
+// #define _GNU_SOURCE
+// #include <sys/types.h>
+// #include <sys/stat.h>
+// #include <sys/shm.h>
+// #include <fcntl.h>
+// #include <stdbool.h>
+// #include <linux/types.h>
+// #include <getopt.h>
+// #include <stdint.h>
+// #include <stdio.h>
+// #include <stdlib.h>
+// #include <string.h>
+// #include <unistd.h>
+// #include <stddef.h>
+// #include <ctype.h>
+// #include <errno.h>
+// #include <error.h>
+// #include <sys/stat.h>
+// #include <sys/mman.h>
+// #include <sys/time.h>
+// #include <sys/ioctl.h>
+// #include <sys/sysinfo.h>
+// // #include <linux/ktime.h>
+// //#include <linux/time64.h>
+// //added
+// #include <stdatomic.h>
+// #include <sched.h>
+// #include <pthread.h>
+// #include <time.h>
+// #include <signal.h>
 
-#include "version.h"
-#include "dmautils.h"
-#include "qdma_nl.h"
-#include "dmaxfer.h"
+// #include "version.h"
+// #include "dmautils.h"
+// #include "qdma_nl.h"
+// #include "dmaxfer.h"
 
-#define QDMA_Q_NAME_LEN     100
-#define QDMA_ST_MAX_PKT_SIZE 0x7000
-#define QDMA_RW_MAX_SIZE	0x7ffff000
-#define QDMA_GLBL_MAX_ENTRIES  (16)
+// #define QDMA_Q_NAME_LEN     100
+// #define QDMA_ST_MAX_PKT_SIZE 0x7000
+// #define QDMA_RW_MAX_SIZE	0x7ffff000
+// #define QDMA_GLBL_MAX_ENTRIES  (16)
 
 // static struct queue_info *q_info;
 // static int q_count;
@@ -747,9 +747,9 @@
 // 			qparm->flags |= XNL_F_PFETCH_EN;
 // 	}
 
-// 	qparm->flags |= (XNL_F_CMPL_STATUS_EN | XNL_F_CMPL_STATUS_ACC_EN |
-// 			XNL_F_CMPL_STATUS_PEND_CHK | XNL_F_CMPL_STATUS_DESC_EN |
-// 			XNL_F_FETCH_CREDIT);
+// 	// qparm->flags |= (XNL_F_CMPL_STATUS_EN | XNL_F_CMPL_STATUS_ACC_EN |
+// 	// 		XNL_F_CMPL_STATUS_PEND_CHK | XNL_F_CMPL_STATUS_DESC_EN |
+// 	// 		XNL_F_FETCH_CREDIT);
 
 // 	return 0;
 // }
@@ -1115,12 +1115,61 @@
 // }
 
 // static int qdma_stop_generator(struct queue_info *q_info, unsigned char user_bar) {
+// 	// int ret = 0;
+// 	// ret = qdma_register_write(q_info->pf, user_bar, 0x08, 0x40);
+// 	// if (ret < 0) {
+// 	// 	printf("Failed to set end C2H generator PF :%d\n", q_info->pf);
+// 	// }
+// 	// return ret;
 // 	int ret = 0;
-// 	ret = qdma_register_write(q_info->pf, user_bar, 0x08, 0x40);
-// 	if (ret < 0) {
-// 		printf("Failed to set end C2H generator PF :%d\n", q_info->pf);
-// 	}
-// 	return ret;
+//     uint32_t status = 0;
+//     int attempts = 0;
+//     const int MAX_ATTEMPTS = 5;  // Up to 5 seconds
+    
+//     printf("Stopping hardware packet generator...\n");
+    
+//     // 1. Send stop command
+//     ret = qdma_register_write(q_info->pf, user_bar, 0x08, 0x40);
+//     if (ret < 0) {
+//         printf("Failed to write stop command to C2H generator PF :%d\n", q_info->pf);
+//         return ret;
+//     }
+    
+//     // 2. Poll status register 0x18 to verify generator stopped
+//     // Register 0x18 bit 0 = 1 means generator is idle/stopped
+//     while (attempts < MAX_ATTEMPTS) {
+//         usleep(200000);  // Wait 200ms before checking
+        
+//         ret = qdma_register_read(q_info->pf, user_bar, 0x18, &status);
+//         if (ret < 0) {
+//             printf("Warning: Failed to read generator status register\n");
+//             break;
+//         }
+        
+//         // Check if generator stopped (bit 0 == 1)
+//         if ((status & 0x1) == 0x1) {
+//             printf("Generator stopped successfully (status=0x%x) after %d attempts\n", 
+//                    status, attempts + 1);
+//             break;
+//         }
+        
+//         printf("Waiting for generator to stop (status=0x%x, attempt %d/%d)...\n", 
+//                status, attempts + 1, MAX_ATTEMPTS);
+//         attempts++;
+//         sleep(1);  // Wait 1 second between polls
+//     }
+    
+//     if (attempts >= MAX_ATTEMPTS) {
+//         printf("WARNING: Generator may not have stopped cleanly (final status=0x%x)\n", status);
+//         // Give extra time for hardware to drain
+//         sleep(2);
+//     } else {
+//         // Even after status shows stopped, give hardware time to fully drain
+//         usleep(500000);  // Wait 500ms for pipeline to drain
+//     }
+    
+//     printf("Hardware drain complete, safe to cleanup queues\n");
+//     return 0;
 // }
 
 // static void *qdma_packet_receiver(void *arg)
@@ -1263,7 +1312,8 @@
 // 	//shutdown_threads = 0;
 
 // 	//Allocate aligned buffer
-// 	posix_memalign((void **)&allocated, 4096 /*alignment */ , size + 4096);
+// 	unsigned int batch_size = size * 8;
+// 	posix_memalign((void **)&allocated, 4096 /*alignment */ , batch_size + 4096);
 // 	if (!allocated) {
 // 		printf("Error: OOM for queue %d buffer size %u.\n", q_info->qid, size + 4096);
 // 		return -ENOMEM;
@@ -1296,7 +1346,8 @@
 // 		//Receive packets from the card
 // 		for (i = 0; i < count; i++) {
 // 			if (q_info[i].dir == DMAXFER_IO_READ) {
-// 				ret = qdmautils_sync_xfer(q_info[i].q_name, q_info[i].dir, buffer, pkt_sz);
+// 				unsigned int batch_size = pkt_sz * 8;
+// 				ret = qdmautils_sync_xfer(q_info[i].q_name, q_info[i].dir, buffer, batch_size);
 // 				if (ret > 0) {
 // 					total_packets += (ret/pkt_sz);
 // 				}
@@ -1338,7 +1389,7 @@
 // 			//qdma_terminate_receiver_threads(q_info, count);
 // 			break;
 // 		}
-// 		usleep(10000); //10ms
+// 		//usleep(10000); //10ms
 // 	}
 // 	//Stop the generator
 // 	ret = qdma_stop_generator(q_info, user_bar);
@@ -1364,7 +1415,7 @@
 
 //     // Clean up buffer
 //     free(allocated);
-// 	return ret;
+	// 	return ret;
 // 	// for (i = 0; i < count; i++) {
 // 	// 	if (q_info[i].dir == DMAXFER_IO_WRITE) {
 // 	// 		/* Transfer DATA from inputfile to Device */
@@ -1399,7 +1450,6 @@
 // 	char *cfg_fname;
 // 	int cmd_opt;
 // 	int ret;
-
 // 	if (argc == 2) {
 // 		if (!strcmp(argv[1], "-v") || !strcmp(argv[1], "--version")) {
 // 			printf("%s version %s\n", PROGNAME, VERSION);
@@ -1407,10 +1457,8 @@
 // 			return 0;
 // 		}
 // 	}
-
 // 	cfg_fname = NULL;
-// 	while ((cmd_opt = getopt_long(argc, argv, "vhxc:c:", long_opts,
-// 					NULL)) != -1) {
+// 	while ((cmd_opt = getopt_long(argc, argv, "vhxc:c:", long_opts, NULL)) != -1) {
 // 		switch (cmd_opt) {
 // 			case 0:
 // 				/* long option */
@@ -1421,27 +1469,26 @@
 // 				break;
 // 			default:
 // 				usage(argv[0]);
+//                 printf("Invalid option\n");
 // 				exit(0);
 // 				break;
 // 		}
 // 	}
-
 // 	if (cfg_fname == NULL) {
 // 		printf("Config file required.\n");
 // 		usage(argv[0]);
 // 		return -EINVAL;
 // 	}
-
 // 	ret = parse_config_file(cfg_fname);
 // 	if (ret < 0) {
 // 		printf("Config File has invalid parameters\n");
 // 		return ret;
 // 	}
-
 // 	ret = qdma_validate_qrange();
-// 	if (ret < 0)
+// 	if (ret < 0) {
+//         printf("Failed to validate qrange\n");
 // 		return ret;
-
+//     }
 // 	q_count = 0;
 // 	/* Addition and Starting of queues handled here */
 // 	q_count = qdma_setup_queues(&q_info);
@@ -1449,7 +1496,6 @@
 // 		printf("qdma_setup_queues failed, ret:%d\n", q_count);
 // 		return q_count;
 // 	}
-	
 // 	/* queues has to be deleted upon termination */
 // 	//atexit(qdma_env_cleanup);
 
@@ -1462,7 +1508,6 @@
 // 		printf("Error: Invalid queue info\n");
 // 		return -EINVAL;
 // 	}
-
 // 	memset(&xcmd, 0, sizeof(struct xcmd_info));
 // 	xcmd.op = XNL_CMD_DEV_INFO;
 // 	xcmd.vf = is_vf;
@@ -1473,7 +1518,6 @@
 // 		printf("Failed to read qmax for PF: %d\n", q_info->pf);
 // 		return ret;
 // 	}
-
 // 	user_bar = xcmd.resp.dev_info.user_bar;
 // 	qbase = xcmd.resp.dev_info.qbase;
 
@@ -1492,7 +1536,6 @@
 // 		qdma_queues_cleanup(q_info, q_count);
 // 		return ret;
 // 	}
-
 // 	printf("Starting DMA transfers on %d queues\n", q_count);
 
 // 	/* Perform DMA transfers on each Queue */
@@ -1500,6 +1543,10 @@
 // 	if (ret < 0)
 // 		printf("Qdmautils Transfer Failed, ret :%d\n", ret);
 
+// 	// Give extra time for all pending operations to complete
+// 	printf("Waiting for hardware to fully settle before cleanup...\n");
+// 	usleep(500000);  // 500ms extra safety margin
+	
 // 	free(cfg_fname);
 // 	qdma_queues_cleanup(q_info, q_count);
 // 	return ret;
@@ -1631,8 +1678,822 @@
 // // 	return ret;
 // // }
 
+/*
+ * ============================================================================
+ * NEW IMPLEMENTATION - Following qdma_run_test_pf.sh C2H test logic
+ * Pure C implementation tracing actual C code invoked by the script
+ * ============================================================================
+ */
 
+/* Additional includes needed for new implementation */
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <time.h>
+#include <pthread.h>
+#include <stdatomic.h>
+#include <semaphore.h>
+#include <sched.h>
+#include <libaio.h>
+#include <sys/uio.h>
+#include <sys/mman.h>
+#include <endian.h>
+#include "version.h"
+#include "dmautils.h"
+#include "qdma_nl.h"
+#include "dmaxfer.h"
+#include "dmactl_internal.h"
 
-int main(int argc, char *argv[]){
+#define MAX_AIO_EVENTS 65536  // Match dmaperf.c line 1136
+#define DEFAULT_PAGE_SIZE 4096
+#define PAGE_SHIFT 12
 
+/* Memory pool for efficient allocation (from dmaperf.c/dmaxfer.c in dma-utils) */
+struct dma_meminfo {
+    void *memptr;
+    unsigned int num_blks;
+};
+
+struct mempool_handle {
+    void *mempool;
+    unsigned int mempool_blkidx;
+    unsigned int mempool_blksz;
+    unsigned int total_memblks;
+    struct dma_meminfo *mempool_info;
+};
+
+/* List node for AIO contexts */
+struct aio_list_head {
+    struct aio_list_head *next;
+    unsigned int max_events;
+    unsigned int completed_events;
+    io_context_t ctxt;
+};
+
+/* Per-queue thread information (two threads per queue) */
+struct queue_thread_info {
+    // Thread handles
+    pthread_t submit_thread;     // Submits I/O requests
+    pthread_t completion_thread;  // Polls for completions
+    
+    // Queue info
+    unsigned int qid;
+    unsigned int bdf;
+    char dev_name[64];
+    int fd;
+    
+    // Configuration
+    unsigned int pkt_size;
+    unsigned int pkt_burst;       // Packets per I/O request
+    
+    // Statistics (atomic for thread-safety)
+    unsigned int num_req_submitted;
+    unsigned int num_req_completed;
+    unsigned long long bytes_received;
+    
+    // Control
+    volatile int running;
+    volatile int io_exit;
+    
+    // Memory pools
+    struct mempool_handle ctxhandle;
+    struct mempool_handle iocbhandle;
+    struct mempool_handle datahandle;
+    
+    // AIO list management
+    struct aio_list_head *head;
+    struct aio_list_head *tail;
+    sem_t llock;
+};
+
+/* Memory pool functions (from dmaxfer.c in dma-utils) */
+static int mempool_create(struct mempool_handle *mpool, unsigned int entry_size,
+                          unsigned int max_entries)
+{
+    if (posix_memalign((void **)&mpool->mempool, DEFAULT_PAGE_SIZE,
+                       max_entries * (entry_size + sizeof(struct dma_meminfo)))) {
+        printf("OOM Mempool\n");
+        return -ENOMEM;
+    }
+    mpool->mempool_info = (struct dma_meminfo *)(((char *)mpool->mempool) + 
+                                                  (max_entries * entry_size));
+    mpool->mempool_blksz = entry_size;
+    mpool->total_memblks = max_entries;
+    mpool->mempool_blkidx = 0;
+    return 0;
+}
+
+static void mempool_free(struct mempool_handle *mpool)
+{
+    if (mpool->mempool) {
+        free(mpool->mempool);
+        mpool->mempool = NULL;
+    }
+}
+
+static void *dma_memalloc(struct mempool_handle *mpool, unsigned int num_blks)
+{
+    unsigned int tmp_blkidx = mpool->mempool_blkidx;
+    unsigned int max_blkcnt = tmp_blkidx + num_blks;
+    unsigned int i, avail = 0;
+    void *memptr = NULL;
+    struct dma_meminfo *_mempool_info = mpool->mempool_info;
+    
+    if (max_blkcnt > mpool->total_memblks) {
+        tmp_blkidx = 0;
+        max_blkcnt = num_blks;
+    }
+    
+    for (i = tmp_blkidx; (i < mpool->total_memblks) && (i < max_blkcnt); i++) {
+        if (_mempool_info[i].memptr) {
+            i += _mempool_info[i].num_blks;
+            max_blkcnt = i + num_blks;
+            avail = 0;
+            tmp_blkidx = i;
+        } else {
+            avail++;
+        }
+        if (max_blkcnt > mpool->total_memblks) {
+            if (num_blks > mpool->mempool_blkidx) return NULL;
+            i = 0;
+            avail = 0;
+            max_blkcnt = num_blks;
+            tmp_blkidx = i;
+        }
+        if (avail == num_blks) {
+            _mempool_info[tmp_blkidx].memptr = &_mempool_info[tmp_blkidx];
+            _mempool_info[tmp_blkidx].num_blks = num_blks;
+            mpool->mempool_blkidx = i + 1;
+            memptr = (char *)mpool->mempool + (tmp_blkidx * mpool->mempool_blksz);
+				break;
+        }
+    }
+    return memptr;
+}
+
+static void dma_free(struct mempool_handle *mpool, void *memptr)
+{
+    struct dma_meminfo *_meminfo = mpool->mempool_info;
+    unsigned int idx;
+    
+    if (!memptr) return;
+    
+    idx = (memptr - mpool->mempool) / mpool->mempool_blksz;
+    if (idx >= mpool->total_memblks) return;
+    
+    _meminfo[idx].num_blks = 0;
+    _meminfo[idx].memptr = NULL;
+}
+
+/* AIO list management */
+static void list_add_tail(struct queue_thread_info *qinfo, struct aio_list_head *node)
+{
+    sem_wait(&qinfo->llock);
+    node->next = NULL;
+    if (!qinfo->head) {
+        qinfo->head = node;
+        qinfo->tail = node;
+    } else {
+        qinfo->tail->next = node;
+        qinfo->tail = node;
+    }
+    sem_post(&qinfo->llock);
+}
+
+static struct aio_list_head *list_pop(struct queue_thread_info *qinfo)
+{
+    struct aio_list_head *node = NULL;
+    sem_wait(&qinfo->llock);
+    if (qinfo->head) {
+        node = qinfo->head;
+        qinfo->head = node->next;
+        if (!qinfo->head)
+            qinfo->tail = NULL;
+    }
+    sem_post(&qinfo->llock);
+    return node;
+}
+
+/* Helper function to read register via mmap (from dmactl_reg.c) */
+static int read_user_register(unsigned int pci_bus, unsigned int pci_dev, 
+                               unsigned int func, unsigned int reg, uint32_t *value)
+{
+    char fname[256];
+    int fd;
+    uint32_t *bar;
+    
+    // Path: /sys/bus/pci/devices/0000:BB:DD.F/resource2 (user BAR)
+    snprintf(fname, sizeof(fname), 
+             "/sys/bus/pci/devices/0000:%02x:%02x.%x/resource2",
+             pci_bus, pci_dev, func);
+    
+    fd = open(fname, O_RDONLY);
+    if (fd < 0) {
+        fprintf(stderr, "Failed to open %s: %s\n", fname, strerror(errno));
+        return -1;
+    }
+    
+    // mmap the register region
+    bar = mmap(NULL, reg + 4, PROT_READ, MAP_SHARED, fd, 0);
+    close(fd);
+    
+    if (bar == MAP_FAILED) {
+        fprintf(stderr, "Failed to mmap register region\n");
+        return -1;
+    }
+    
+    *value = le32toh(bar[reg / 4]);
+    munmap(bar, reg + 4);
+    
+    return 0;
+}
+
+/* Helper function to write register via mmap (from dmactl_reg.c) */
+static int write_user_register(unsigned int pci_bus, unsigned int pci_dev,
+                                unsigned int func, unsigned int reg, uint32_t value)
+{
+    char fname[256];
+    int fd;
+    uint32_t *bar;
+    
+    snprintf(fname, sizeof(fname),
+             "/sys/bus/pci/devices/0000:%02x:%02x.%x/resource2",
+             pci_bus, pci_dev, func);
+    
+    fd = open(fname, O_RDWR);
+    if (fd < 0) {
+        fprintf(stderr, "Failed to open %s: %s\n", fname, strerror(errno));
+        return -1;
+    }
+    
+    bar = mmap(NULL, reg + 4, PROT_WRITE, MAP_SHARED, fd, 0);
+    close(fd);
+    
+    if (bar == MAP_FAILED) {
+        fprintf(stderr, "Failed to mmap register region\n");
+        return -1;
+    }
+    
+    bar[reg / 4] = htole32(value);
+    munmap(bar, reg + 4);
+    
+	return 0;
+}
+
+/* Queue management via netlink (from dmactl.c and cmd_parse.c) */
+static int queue_add(unsigned int bdf, unsigned int qid, int is_vf)
+{
+    struct xcmd_info xcmd;
+    struct xcmd_q_parm *qparm;
+    uint32_t attrs[XNL_ATTR_MAX] = {0};
+    
+    memset(&xcmd, 0, sizeof(xcmd));
+    qparm = &xcmd.req.qparm;
+    
+    xcmd.op = XNL_CMD_Q_ADD;
+    xcmd.vf = is_vf;
+    xcmd.if_bdf = bdf;
+    qparm->idx = qid;
+    qparm->num_q = 1;
+    qparm->flags = XNL_F_QMODE_ST | XNL_F_QDIR_C2H;
+    qparm->sflags = qparm->flags;
+    
+    return xnl_common_msg_send(&xcmd, attrs);
+}
+
+static int queue_start(unsigned int bdf, unsigned int qid, int is_vf)
+{
+    struct xcmd_info xcmd;
+    struct xcmd_q_parm *qparm;
+    uint32_t attrs[XNL_ATTR_MAX] = {0};
+    
+    memset(&xcmd, 0, sizeof(xcmd));
+    qparm = &xcmd.req.qparm;
+    
+    xcmd.op = XNL_CMD_Q_START;
+    xcmd.vf = is_vf;
+    xcmd.if_bdf = bdf;
+    qparm->idx = qid;
+    qparm->num_q = 1;
+    qparm->fetch_credit = Q_ENABLE_C2H_FETCH_CREDIT;
+    qparm->qrngsz_idx = 9;  // Ring size index 9 = 2048 descriptors (default)
+    
+    // Flags from cmd_parse.c line 1058-1060
+    qparm->flags = XNL_F_QMODE_ST | XNL_F_QDIR_C2H |
+                   XNL_F_CMPL_STATUS_EN | XNL_F_CMPL_STATUS_ACC_EN |
+                   XNL_F_CMPL_STATUS_PEND_CHK | XNL_F_CMPL_STATUS_DESC_EN |
+                   XNL_F_FETCH_CREDIT;
+    
+    // Default completion entry size for ST C2H
+    qparm->cmpt_entry_size = XNL_ST_C2H_CMPT_DESC_SIZE_8B;
+    
+    return xnl_common_msg_send(&xcmd, attrs);
+}
+
+static int queue_stop(unsigned int bdf, unsigned int qid, int is_vf)
+{
+    struct xcmd_info xcmd;
+    struct xcmd_q_parm *qparm;
+    uint32_t attrs[XNL_ATTR_MAX] = {0};
+    
+    memset(&xcmd, 0, sizeof(xcmd));
+    qparm = &xcmd.req.qparm;
+    
+    xcmd.op = XNL_CMD_Q_STOP;
+    xcmd.vf = is_vf;
+    xcmd.if_bdf = bdf;
+    qparm->idx = qid;
+    qparm->num_q = 1;
+    qparm->flags = XNL_F_QMODE_ST | XNL_F_QDIR_C2H;
+    
+    return xnl_common_msg_send(&xcmd, attrs);
+}
+
+static int queue_del(unsigned int bdf, unsigned int qid, int is_vf)
+{
+    struct xcmd_info xcmd;
+    struct xcmd_q_parm *qparm;
+    uint32_t attrs[XNL_ATTR_MAX] = {0};
+    
+    memset(&xcmd, 0, sizeof(xcmd));
+    qparm = &xcmd.req.qparm;
+    
+    xcmd.op = XNL_CMD_Q_DEL;
+    xcmd.vf = is_vf;
+    xcmd.if_bdf = bdf;
+    qparm->idx = qid;
+    qparm->num_q = 1;
+    qparm->flags = XNL_F_QMODE_ST | XNL_F_QDIR_C2H;
+    
+    return xnl_common_msg_send(&xcmd, attrs);
+}
+
+/* Completion thread - polls for completed I/O events (like event_mon in dmaperf) */
+static void *completion_thread(void *arg)
+{
+    struct queue_thread_info *qinfo = (struct queue_thread_info *)arg;
+    struct io_event *events = NULL;
+    int num_events;
+    struct timespec ts_cur = {0, 0};
+    
+    events = calloc(MAX_AIO_EVENTS, sizeof(struct io_event));
+    if (!events) {
+        fprintf(stderr, "Q%u completion: OOM for events\n", qinfo->qid);
+		return NULL;
+	}
+    
+    printf("Q%u: Completion thread started\n", qinfo->qid);
+    
+    while (!qinfo->io_exit) {
+        struct aio_list_head *node = list_pop(qinfo);
+        if (!node) {
+            // Don't sleep - just yield CPU to avoid busy wait burning CPU cycles
+            sched_yield();
+            continue;
+        }
+        
+        memset(events, 0, MAX_AIO_EVENTS * sizeof(struct io_event));
+        do {
+            num_events = io_getevents(node->ctxt, 1,
+                                       node->max_events - node->completed_events,
+                                       events, &ts_cur);
+            
+            for (int j = 0; (num_events > 0) && (j < num_events); j++) {
+                struct iocb *iocb = (struct iocb *)events[j].obj;
+                if (!iocb) continue;
+                
+                // Update completion counter and bytes
+                qinfo->num_req_completed++;
+                qinfo->bytes_received += events[j].res;
+                
+                // Free buffers
+                struct iovec *iov = (struct iovec *)(iocb->u.c.buf);
+                if (iov) {
+                    for (unsigned int bufcnt = 0; bufcnt < iocb->u.c.nbytes; bufcnt++) {
+                        dma_free(&qinfo->datahandle, iov[bufcnt].iov_base);
+                    }
+                }
+                dma_free(&qinfo->iocbhandle, iocb);
+            }
+            
+            if (num_events > 0)
+                node->completed_events += num_events;
+            
+            if (node->completed_events >= node->max_events) {
+                io_destroy(node->ctxt);
+                dma_free(&qinfo->ctxhandle, node);
+                break;
+            }
+        } while (!qinfo->io_exit);
+        
+        if (node->completed_events < node->max_events) {
+            sem_wait(&qinfo->llock);
+            node->next = qinfo->head;
+            qinfo->head = node;
+            sem_post(&qinfo->llock);
+        }
+    }
+    
+    free(events);
+    printf("Q%u: Completion thread stopped\n", qinfo->qid);
+    return NULL;
+}
+
+/* Submit thread - submits async I/O requests (like io_thread in dmaperf) */
+static void *submit_thread(void *arg)
+{
+    struct queue_thread_info *qinfo = (struct queue_thread_info *)arg;
+    // Ring size - should match glbl_rng_sz[rngidx] from hardware
+    // For rngidx=0, this is typically 2048
+    unsigned int max_reqs = 2048;
+    
+    // For ST C2H: io_sz = pkt_burst * pkt_size, burst_cnt = 1 (like dmaperf.c lines 1871-1873)
+    unsigned int io_sz = qinfo->pkt_burst * qinfo->pkt_size;
+    unsigned int burst_cnt = 1;  // Only 1 iovec for ST C2H
+    unsigned int num_desc = (io_sz + DEFAULT_PAGE_SIZE - 1) >> PAGE_SHIFT;
+    unsigned int cnt;
+	int ret;
+    struct iocb *io_list[1];
+    
+    // Create memory pools (matching dmaperf.c lines 1877-1879)
+    mempool_create(&qinfo->datahandle, num_desc * DEFAULT_PAGE_SIZE,
+                   max_reqs + (burst_cnt * num_desc));
+    mempool_create(&qinfo->ctxhandle, sizeof(struct aio_list_head), max_reqs);
+    mempool_create(&qinfo->iocbhandle, 
+                   sizeof(struct iocb) + (burst_cnt * sizeof(struct iovec)),
+                   max_reqs + (burst_cnt * num_desc));
+    
+    // Create completion thread
+    if (pthread_create(&qinfo->completion_thread, NULL, completion_thread, qinfo)) {
+        fprintf(stderr, "Q%u: Failed to create completion thread\n", qinfo->qid);
+        return NULL;
+    }
+    
+    printf("Q%u: Submit thread started (io_sz=%u, burst_cnt=%u, num_desc=%u)\n", 
+           qinfo->qid, io_sz, burst_cnt, num_desc);
+    
+    while (qinfo->running) {
+        struct aio_list_head *node = dma_memalloc(&qinfo->ctxhandle, 1);
+        if (!node) {
+            sched_yield();
+            continue;
+        }
+        
+        ret = io_queue_init(MAX_AIO_EVENTS, &node->ctxt);
+        if (ret != 0) {
+            fprintf(stderr, "Q%u: io_queue_init failed: %d\n", qinfo->qid, ret);
+            dma_free(&qinfo->ctxhandle, node);
+            sched_yield();
+            continue;
+        }
+        
+        cnt = 0;
+        node->max_events = MAX_AIO_EVENTS;
+        list_add_tail(qinfo, node);
+        
+        while (qinfo->running && cnt < MAX_AIO_EVENTS) {
+            // Check if we have too many outstanding requests
+            unsigned int submitted = qinfo->num_req_submitted;
+            unsigned int completed = qinfo->num_req_completed;
+            if ((submitted - completed) * num_desc > max_reqs) {
+                sched_yield();
+                continue;
+            }
+            
+            // Allocate I/O control block
+            io_list[0] = dma_memalloc(&qinfo->iocbhandle, 1);
+            if (!io_list[0]) {
+                if (cnt) {
+                    node->max_events = cnt;
+                    break;
+                }
+                sched_yield();
+                continue;
+            }
+            
+            // Allocate data buffer(s) - for ST C2H, burst_cnt = 1
+            struct iovec *iov = (struct iovec *)(io_list[0] + 1);
+            unsigned int iovcnt = 0;
+            for (iovcnt = 0; iovcnt < burst_cnt; iovcnt++) {
+                iov[iovcnt].iov_base = dma_memalloc(&qinfo->datahandle, 1);
+                if (!iov[iovcnt].iov_base)
+                    break;
+                iov[iovcnt].iov_len = io_sz;  // Full burst size (pkt_burst * pkt_size)
+            }
+            
+            if (iovcnt == 0) {
+                dma_free(&qinfo->iocbhandle, io_list[0]);
+                continue;
+            }
+            
+            // Prepare async read (C2H)
+            io_prep_preadv(io_list[0], qinfo->fd, iov, iovcnt, 0);
+            
+            // Submit I/O
+            ret = io_submit(node->ctxt, 1, io_list);
+            if (ret != 1) {
+                fprintf(stderr, "Q%u: io_submit failed: %d (errno=%d)\n", qinfo->qid, ret, errno);
+                for (; iovcnt > 0; iovcnt--)
+                    dma_free(&qinfo->datahandle, iov[iovcnt - 1].iov_base);
+                dma_free(&qinfo->iocbhandle, io_list[0]);
+                node->max_events = cnt;
+			break;
+		}
+            
+            qinfo->num_req_submitted++;
+            cnt++;
+        }
+    }
+    
+    // Signal completion thread to exit
+    qinfo->io_exit = 1;
+    pthread_join(qinfo->completion_thread, NULL);
+    
+    // Clean up memory pools
+    mempool_free(&qinfo->datahandle);
+    mempool_free(&qinfo->iocbhandle);
+    mempool_free(&qinfo->ctxhandle);
+    
+    printf("Q%u: Submit thread stopped\n", qinfo->qid);
+    return NULL;
+}
+
+/* Main test function following script logic with multi-threading */
+int main(int argc, char *argv[])
+{
+    struct queue_thread_info *qthreads = NULL;
+    time_t start_time, current_time;
+    struct timespec ts_start, ts_current;
+    uint64_t start_time_ns, current_time_ns, last_stats_time = 0;
+    int ret = 0;
+    uint32_t status_reg;
+    
+    // Configuration - can be read from config file or command line
+    unsigned int pci_bus = 0x99;
+    unsigned int pci_dev = 0x00;
+    unsigned int pf = 0;
+    unsigned int q_start = 0;  // Starting queue ID
+    unsigned int num_queues = 2;  // Number of queues to use
+    unsigned int pkt_size = 1024;
+    unsigned int bdf = (pci_bus << 12) | (pci_dev << 4) | pf;
+    int is_vf = 0;
+    unsigned int test_duration = 10;  // seconds
+    
+    printf("==============================================\n");
+    printf("QDMA Multi-Queue C2H Test\n");
+    printf("PCI: %02x:%02x.%x, Queues: %u-%u, Packet Size: %u bytes\n", 
+           pci_bus, pci_dev, pf, q_start, q_start + num_queues - 1, pkt_size);
+    printf("Number of worker threads: %u\n", num_queues);
+    printf("==============================================\n\n");
+    
+    // Allocate thread info array
+    qthreads = calloc(num_queues, sizeof(struct queue_thread_info));
+    if (!qthreads) {
+        fprintf(stderr, "ERROR: Failed to allocate thread info\n");
+        return -1;
+    }
+    
+    // Step 1: Cleanup any existing queues
+    printf("Step 1: Cleaning up existing queues...\n");
+    for (unsigned int i = 0; i < num_queues; i++) {
+        unsigned int qid = q_start + i;
+        queue_stop(bdf, qid, is_vf);  // Ignore errors
+        usleep(50000);
+        queue_del(bdf, qid, is_vf);  // Ignore errors
+    }
+    usleep(500000);  // Wait for cleanup
+    
+    // Step 2: Add and start all queues
+    printf("Step 2: Adding %u C2H queues...\n", num_queues);
+    for (unsigned int i = 0; i < num_queues; i++) {
+        unsigned int qid = q_start + i;
+        
+        ret = queue_add(bdf, qid, is_vf);
+        if (ret < 0) {
+            printf("ERROR: queue_add failed for Q%u: %d\n", qid, ret);
+            goto cleanup;
+        }
+        
+        ret = queue_start(bdf, qid, is_vf);
+	if (ret < 0) {
+            printf("ERROR: queue_start failed for Q%u: %d\n", qid, ret);
+            goto cleanup;
+        }
+        
+        // Open device file for this queue
+        snprintf(qthreads[i].dev_name, sizeof(qthreads[i].dev_name),
+                 "/dev/qdma%05x-ST-%u", bdf, qid);
+        
+        // Open with O_RDWR like dmaperf.c (line 2017), no O_NONBLOCK for AIO
+        qthreads[i].fd = open(qthreads[i].dev_name, O_RDWR);
+        if (qthreads[i].fd < 0) {
+            fprintf(stderr, "ERROR: Failed to open %s: %s\n", 
+                    qthreads[i].dev_name, strerror(errno));
+            ret = -1;
+            goto cleanup;
+        }
+        
+        // Initialize thread info
+        qthreads[i].qid = qid;
+        qthreads[i].bdf = bdf;
+        qthreads[i].pkt_size = pkt_size;
+        atomic_init(&qthreads[i].bytes_received, 0);
+        qthreads[i].running = 0;  // Not started yet
+        
+        printf("Queue %u ready: %s\n", qid, qthreads[i].dev_name);
+    }
+    
+    usleep(200000);  // Wait for all queues to be ready
+    
+    // Step 3: Program RSS table (distribute across queues)
+    printf("Step 3: Programming RSS table (distributing to %u queues)...\n", num_queues);
+    for (int i = 0; i < 128; i++) {
+        unsigned int target_qid = q_start + (i % num_queues);  // Round-robin distribution
+        write_user_register(pci_bus, pci_dev, pf, 0xA8 + (i * 4), target_qid);
+    }
+    
+    // Step 4: Program hardware generator parameters
+    printf("Step 4: Programming hardware generator...\n");
+    write_user_register(pci_bus, pci_dev, pf, 0x04, pkt_size);      // Transfer size
+    write_user_register(pci_bus, pci_dev, pf, 0x1C, 0);             // Cycles/pkt = 0 (max rate)
+    write_user_register(pci_bus, pci_dev, pf, 0x28, num_queues);    // Num queues
+    write_user_register(pci_bus, pci_dev, pf, 0x20, 0);             // Traffic pattern
+    write_user_register(pci_bus, pci_dev, pf, 0x00, q_start);       // HW QID base
+    
+    // Step 5: Start C2H generator
+    printf("Step 5: Starting C2H generator...\n");
+    ret = write_user_register(pci_bus, pci_dev, pf, 0x08, 0x2);
+	if (ret < 0) {
+        printf("ERROR: Failed to start generator\n");
+        goto cleanup;
+    }
+    
+    usleep(100000);  // Wait for generator to start
+    
+    // Step 6: Initialize and create worker threads (submit threads)
+    printf("Step 6: Starting %u worker threads (2 threads/queue: submit + completion)...\n", num_queues);
+    for (unsigned int i = 0; i < num_queues; i++) {
+        // Initialize semaphore for AIO list
+        sem_init(&qthreads[i].llock, 0, 1);
+        qthreads[i].head = NULL;
+        qthreads[i].tail = NULL;
+        qthreads[i].pkt_burst = 64;  // Match dmaperf config (num_pkt=64)
+        qthreads[i].num_req_submitted = 0;
+        qthreads[i].num_req_completed = 0;
+        qthreads[i].bytes_received = 0;
+        qthreads[i].running = 1;
+        qthreads[i].io_exit = 0;
+        
+        // Create submit thread (which will create completion thread)
+        if (pthread_create(&qthreads[i].submit_thread, NULL, submit_thread, &qthreads[i]) != 0) {
+            fprintf(stderr, "ERROR: Failed to create submit thread for Q%u\n", qthreads[i].qid);
+            ret = -1;
+            goto stop_threads;
+        }
+    }
+    
+    printf("All threads started. Beginning statistics collection...\n\n");
+    
+    // Step 7: Main thread monitors and accumulates stats
+    start_time = time(NULL);
+    clock_gettime(CLOCK_MONOTONIC, &ts_start);
+    start_time_ns = ts_start.tv_sec * 1000000000ULL + ts_start.tv_nsec;
+    last_stats_time = 0;
+    uint64_t last_total_bytes = 0;
+    
+    while (1) {
+        current_time = time(NULL);
+        
+        if (current_time - start_time >= test_duration) {
+            printf("\nTest duration reached (%u seconds)\n", test_duration);
+            break;
+        }
+        
+        // Accumulate bytes from all queue threads (atomic reads)
+        uint64_t current_total_bytes = 0;
+        for (unsigned int i = 0; i < num_queues; i++) {
+            current_total_bytes += qthreads[i].bytes_received;
+        }
+        
+        // Print aggregate stats every second
+        clock_gettime(CLOCK_MONOTONIC, &ts_current);
+        current_time_ns = ts_current.tv_sec * 1000000000ULL + ts_current.tv_nsec;
+        uint64_t elapsed_ns = current_time_ns - start_time_ns;
+        
+        if (elapsed_ns - last_stats_time >= 1000000000ULL) {  // 1 second
+            uint64_t bytes_this_sec = current_total_bytes - last_total_bytes;
+            double gbps = (double)(bytes_this_sec * 8) / 1000000000.0;
+            
+            // Show per-queue breakdown
+            printf("Rate: %.4f Gbit/sec [", gbps);
+            for (unsigned int i = 0; i < num_queues; i++) {
+                uint64_t q_bytes = atomic_load(&qthreads[i].bytes_received);
+                if (i > 0) printf(", ");
+                printf("Q%u: %.2f", qthreads[i].qid, (double)(q_bytes * 8) / 1000000000.0);
+            }
+            printf(" Gbit cumulative]\n");
+            
+            last_total_bytes = current_total_bytes;
+            last_stats_time = elapsed_ns;
+        }
+        
+        usleep(10000);  // Small delay for main thread (10ms)
+    }
+    
+    // Step 8: Stop threads
+stop_threads:
+    printf("\nStopping worker threads...\n");
+    for (unsigned int i = 0; i < num_queues; i++) {
+        qthreads[i].running = 0;  // Signal submit thread to stop
+    }
+    
+    // Wait for all submit threads to finish (they will wait for completion threads)
+    for (unsigned int i = 0; i < num_queues; i++) {
+        if (qthreads[i].submit_thread) {
+            pthread_join(qthreads[i].submit_thread, NULL);
+        }
+        sem_destroy(&qthreads[i].llock);
+    }
+    
+    printf("All threads stopped.\n");
+    
+    // Step 9: Stop generator
+    printf("Stopping hardware generator...\n");
+    write_user_register(pci_bus, pci_dev, pf, 0x08, 0x40);
+    
+    // Step 10: Wait for generator to stop (poll register 0x18)
+    printf("Waiting for generator to stop...\n");
+    for (int wait = 0; wait < 3; wait++) {
+        sleep(1);
+        if (read_user_register(pci_bus, pci_dev, pf, 0x18, &status_reg) == 0) {
+            if ((status_reg & 0x1) == 0x1) {
+                printf("Generator stopped (status=0x%x)\n", status_reg);
+                break;
+            }
+        }
+    }
+    
+    usleep(500000);  // Extra settling time
+    
+    // Step 11: Close device files
+    for (unsigned int i = 0; i < num_queues; i++) {
+        if (qthreads[i].fd >= 0) {
+            close(qthreads[i].fd);
+            qthreads[i].fd = -1;
+        }
+    }
+    
+    // Step 12: Stop and delete all queues
+    printf("Cleaning up queues...\n");
+cleanup:
+    for (unsigned int i = 0; i < num_queues; i++) {
+        unsigned int qid = q_start + i;
+        queue_stop(bdf, qid, is_vf);
+        usleep(50000);
+    }
+    usleep(200000);
+    
+    for (unsigned int i = 0; i < num_queues; i++) {
+        unsigned int qid = q_start + i;
+        queue_del(bdf, qid, is_vf);
+    }
+    
+    // Step 13: Calculate final statistics
+    clock_gettime(CLOCK_MONOTONIC, &ts_current);
+    current_time_ns = ts_current.tv_sec * 1000000000ULL + ts_current.tv_nsec;
+    double total_time = (double)(current_time_ns - start_time_ns) / 1000000000.0;
+    
+    // Get final byte counts from all queues
+    uint64_t total_bytes = 0;
+    for (unsigned int i = 0; i < num_queues; i++) {
+        total_bytes += atomic_load(&qthreads[i].bytes_received);
+    }
+    
+    double avg_gbps = (double)(total_bytes * 8) / total_time / 1000000000.0;
+    
+    printf("\n=== Final Statistics ===\n");
+    printf("Total bytes received: %lu\n", total_bytes);
+    printf("Test duration: %.2f seconds\n", total_time);
+    printf("Average throughput: %.4f Gbit/sec\n", avg_gbps);
+    printf("Packet size: %u bytes\n", pkt_size);
+    
+    // Per-queue breakdown
+    printf("\nPer-Queue Statistics:\n");
+    for (unsigned int i = 0; i < num_queues; i++) {
+        uint64_t q_bytes = atomic_load(&qthreads[i].bytes_received);
+        double q_gbps = (double)(q_bytes * 8) / total_time / 1000000000.0;
+        printf("  Queue %u: %lu bytes (%.4f Gbit/sec)\n", 
+               qthreads[i].qid, q_bytes, q_gbps);
+    }
+    printf("========================\n");
+    
+    if (qthreads)
+        free(qthreads);
+    
+    printf("\nTest completed successfully.\n");
+    return ret;
 }

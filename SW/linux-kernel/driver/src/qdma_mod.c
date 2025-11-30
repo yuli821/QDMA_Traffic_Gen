@@ -36,7 +36,7 @@
 /* include early, to verify it depends only on the headers above */
 #include "version.h"
 //net driver
-#include "net/qdma_net.h"
+#include "../net/qdma_net.h"
 
 #define QDMA_DEFAULT_TOTAL_Q 2048
 
@@ -1630,11 +1630,11 @@ static int probe_one(struct pci_dev *pdev, const struct pci_device_id *id)
 			goto close_device;
 	}
 	//net driver
-	// rv = qdma_net_register(pdev, (struct xlnx_dma_dev *)xpdev->dev_hndl, xpdev);
-	// if (rv < 0) {
-	// 	pr_warn("Failed to register network device: %d\n", rv);
-	// 	// Don't fail probe, DMA functionality still works
-	// }
+	rv = qdma_net_register(pdev, (struct xlnx_dma_dev *)xpdev->dev_hndl, xpdev);
+	if (rv < 0) {
+		pr_warn("Failed to register network device: %d\n", rv);
+	    // Don't fail probe, DMA functionality still works
+	}
 
 	dev_set_drvdata(&pdev->dev, xpdev);
 
@@ -1694,7 +1694,7 @@ static void remove_one(struct pci_dev *pdev)
 	qdma_cdev_device_cleanup(&xpdev->cdev_cb);
 
 	//net driver
-	qdma_net_unregister((struct xlnx_dma_dev *)xpdev->dev_hndl);
+	qdma_net_unregister(xpdev);
 
 	xpdev_device_cleanup(xpdev);
 

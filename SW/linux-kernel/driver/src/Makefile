@@ -99,7 +99,7 @@ else
   override symverfile =
 endif
 
-DRV_OBJS := nl.o cdev.o qdma_mod.o
+DRV_OBJS := nl.o cdev.o qdma_mod.o ../net/qdma_net.o ../net/qdma_net_txrx.o
 
 LIBQDMA_OBJS := libqdma/qdma_mbox.o libqdma/qdma_intr.o libqdma/qdma_st_c2h.o \
 	libqdma/qdma_thread.o libqdma/libqdma_export.o libqdma/qdma_context.o \

@@ -572,6 +572,152 @@ static int qdma_register_read(unsigned char is_vf,
 	return ret;
 }
 
+/**
+ * qdma_hw_setup_c2h_generator() - Setup hardware C2H data generator
+ * @is_vf: VF flag
+ * @pf: PCI BDF
+ * @num_queues: Number of queues to generate traffic for
+ * @pkt_size: Packet size in bytes
+ *
+ * This function programs the hardware registers needed to start the C2H
+ * data generator. It follows the sequence from qdma_run_test_pf.sh:
+ * 1. Program RSS table (0xA8+) - 128 entries mapping to queue 0
+ * 2. Program transfer size (0x04)
+ * 3. Program cycles per packet (0x1C) - 0 for back-to-back
+ * 4. Program number of queues (0x28)
+ * 5. Program traffic pattern (0x20) - 0 for sequential
+ * 6. Program hardware QID (0x00) - 0 for queue 0
+ * 7. Start C2H generator (0x08) - bit 1 = start
+ *
+ * Return: 0 on success, negative error code on failure
+ */
+static int qdma_hw_setup_c2h_generator(unsigned char is_vf,
+		unsigned int pf, unsigned int num_queues,
+		unsigned int pkt_size)
+{
+	int ret;
+	unsigned int usr_bar = 2;  // User bar for register access
+	
+	printf("Setting up C2H hardware generator:\n");
+	printf("  - Number of queues: %u\n", num_queues);
+	printf("  - Packet size: %u bytes\n", pkt_size);
+	
+	// Program RSS table - 128 entries, all point to queue 0
+	printf("  - Programming RSS table (128 entries)...\n");
+	for (unsigned int i = 0; i < 128; i++) {
+		unsigned int rss_qid = i % num_queues;  // All RSS entries point to queue 0
+		unsigned long rss_addr = 0xA8 + (i * 4);
+		ret = qdma_register_write(is_vf, pf, usr_bar, rss_addr, rss_qid);
+		if (ret < 0) {
+			printf("ERROR: Failed to program RSS entry %u\n", i);
+			return ret;
+		}
+	}
+	
+	// Program transfer size (0x04)
+	ret = qdma_register_write(is_vf, pf, usr_bar, 0x04, pkt_size);
+	if (ret < 0) {
+		printf("ERROR: Failed to program transfer size\n");
+		return ret;
+	}
+	
+	// Program cycles per packet (0x1C) - 0 for back-to-back packets
+	ret = qdma_register_write(is_vf, pf, usr_bar, 0x1C, 0);
+	if (ret < 0) {
+		printf("ERROR: Failed to program cycles per packet\n");
+		return ret;
+	}
+	
+	// Program number of queues (0x28)
+	ret = qdma_register_write(is_vf, pf, usr_bar, 0x28, num_queues);
+	if (ret < 0) {
+		printf("ERROR: Failed to program number of queues\n");
+		return ret;
+	}
+	
+	// Program traffic pattern (0x20) - 0 for sequential pattern
+	ret = qdma_register_write(is_vf, pf, usr_bar, 0x20, 0);
+	if (ret < 0) {
+		printf("ERROR: Failed to program traffic pattern\n");
+		return ret;
+	}
+	
+	// Program hardware QID (0x00) - 0 for starting from queue 0
+	ret = qdma_register_write(is_vf, pf, usr_bar, 0x00, 0);
+	if (ret < 0) {
+		printf("ERROR: Failed to program hardware QID\n");
+		return ret;
+	}
+	
+	// Start C2H generator (0x08) - bit 1 = start
+	printf("  - Starting C2H generator...\n");
+	ret = qdma_register_write(is_vf, pf, usr_bar, 0x08, 2);
+	if (ret < 0) {
+		printf("ERROR: Failed to start C2H generator\n");
+		return ret;
+	}
+	
+	printf("C2H hardware generator setup complete\n");
+	return 0;
+}
+
+/**
+ * qdma_hw_stop_c2h_generator() - Stop hardware C2H data generator
+ * @is_vf: VF flag
+ * @pf: PCI BDF
+ *
+ * This function stops the C2H data generator and waits for hardware to drain.
+ * It follows the sequence from qdma_run_test_pf.sh:
+ * 1. Stop generator (0x08 = 0x40)
+ * 2. Poll status register (0x18) until bit 0 = 1 (idle)
+ * 3. Wait up to 2 seconds for hardware to complete
+ *
+ * Return: 0 on success, negative error code on failure
+ */
+static int qdma_hw_stop_c2h_generator(unsigned char is_vf, unsigned int pf)
+{
+	int ret;
+	unsigned int usr_bar = 2;
+	unsigned int status_reg;
+	int retry = 20;  // 20 retries with 100ms sleep = 2 seconds max
+	
+	printf("Stopping C2H hardware generator...\n");
+	
+	// Stop generator (0x08 = 0x40 = stop bit)
+	ret = qdma_register_write(is_vf, pf, usr_bar, 0x08, 0x40);
+	if (ret < 0) {
+		printf("ERROR: Failed to write stop command\n");
+		return ret;
+	}
+	
+	// Poll status register (0x18) until idle (bit 0 = 1)
+	printf("  - Waiting for hardware to drain...\n");
+	while (retry > 0) {
+		ret = qdma_register_read(is_vf, pf, usr_bar, 0x18, &status_reg);
+		if (ret < 0) {
+			printf("ERROR: Failed to read status register\n");
+			return ret;
+		}
+		
+		if (status_reg & 0x1) {
+			printf("  - Hardware idle (status = 0x%x)\n", status_reg);
+			break;
+		}
+		
+		usleep(100000);  // 100ms
+		retry--;
+	}
+	
+	if (retry == 0) {
+		printf("WARNING: Timeout waiting for hardware to idle (status = 0x%x)\n", 
+		       status_reg);
+		// Don't return error, just warn - allow cleanup to proceed
+	}
+	
+	printf("C2H hardware generator stopped\n");
+	return 0;
+}
+
 static void create_thread_info(void)
 {
 	unsigned int base = 0;
@@ -756,9 +902,17 @@ static void create_thread_info(void)
 	}
 	if ((mode == Q_MODE_ST) && (dir != Q_DIR_H2C)) {
 		if (!stm_mode) {
-			qdma_register_write(vf_perf, (pci_bus << 12) | (pci_dev << 4) | pf_start, 2, 0x08,
-					QDMA_UL_IMM_DUMP_C2H_DATA | QDMA_UL_IMM_DUMP_CMPT_FIFO/* | QDMA_UL_DROP_ENABLE*/);
-			usleep(1000);
+			// qdma_register_write(vf_perf, (pci_bus << 12) | (pci_dev << 4) | pf_start, 2, 0x08,
+			// 		QDMA_UL_IMM_DUMP_C2H_DATA | QDMA_UL_IMM_DUMP_CMPT_FIFO/* | QDMA_UL_DROP_ENABLE*/);
+			// usleep(1000);
+			int ret = qdma_hw_setup_c2h_generator(vf_perf, 
+				(pci_bus << 12) | (pci_dev << 4) | pf_start,
+				num_q * num_pf,  // Total number of queues
+				pkt_sz);         // Packet size
+			if (ret < 0) {
+				printf("ERROR: Failed to setup C2H hardware generator\n");
+				exit(1);
+			}
 		}
 	}
 	if (shmdt(_info) == -1) {
@@ -2037,14 +2191,15 @@ static void dump_result(unsigned long long total_io_sz)
 	unsigned long long kil_div = ((unsigned long long)tsecs * 1000);
 	unsigned long long byt_div = ((unsigned long long)tsecs);
 
-	if ((total_io_sz/gig_div)) {
-		printf("BW = %f GB/sec\n", ((double)total_io_sz/gig_div));
-	} else if ((total_io_sz/meg_div)) {
-		printf("BW = %f MB/sec\n", ((double)total_io_sz/meg_div));
-	} else if ((total_io_sz/kil_div)) {
-		printf("BW = %f KB/sec\n", ((double)total_io_sz/kil_div));
-	} else
-		printf("BW = %f Bytes/sec\n", ((double)total_io_sz/byt_div));
+	// if ((total_io_sz/gig_div)) {
+	printf("BW = %f Gbps\n", ((double)total_io_sz/gig_div) * 8.0);
+	// } 
+// 	else if ((total_io_sz/meg_div)) {
+// 		printf("BW = %f Mbps\n", ((double)total_io_sz/meg_div) * 8.0);
+// 	} else if ((total_io_sz/kil_div)) {
+// 		printf("BW = %f Kbps\n", ((double)total_io_sz/kil_div) * 8.0);
+// 	} else
+// 		printf("BW = %f Bits/sec\n", ((double)total_io_sz/byt_div) * 8.0);
 }
 
 static int is_valid_fd(int fd)
@@ -2087,7 +2242,7 @@ static void cleanup(void)
 	        error(-1, errno, " ");
 	}
 	if (info == NULL) return;
-
+	qdma_hw_stop_c2h_generator(vf_perf, info[0].pf);
 	if (dump_en) {
 		s = system(pci_dump);
 		if (s != 0) {
