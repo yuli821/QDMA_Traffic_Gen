@@ -1,0 +1,206 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<wave_config>
+   <wave_state>
+   </wave_state>
+   <db_ref_list>
+      <db_ref path="traffic_gen_tb_behav.wdb" id="1">
+         <top_modules>
+            <top_module name="glbl" />
+            <top_module name="traffic_gen_tb" />
+         </top_modules>
+      </db_ref>
+   </db_ref_list>
+   <zoom_setting>
+      <ZoomStartTime time="9,312.600 ns"></ZoomStartTime>
+      <ZoomEndTime time="9,474.201 ns"></ZoomEndTime>
+      <Cursor1Time time="9,350.000 ns"></Cursor1Time>
+   </zoom_setting>
+   <column_width_setting>
+      <NameColumnWidth column_width="187"></NameColumnWidth>
+      <ValueColumnWidth column_width="74"></ValueColumnWidth>
+   </column_width_setting>
+   <WVObjectSize size="45" />
+   <wvobject type="logic" fp_name="/traffic_gen_tb/clk">
+      <obj_property name="ElementShortName">clk</obj_property>
+      <obj_property name="ObjectShortName">clk</obj_property>
+   </wvobject>
+   <wvobject type="logic" fp_name="/traffic_gen_tb/credit_updt">
+      <obj_property name="ElementShortName">credit_updt</obj_property>
+      <obj_property name="ObjectShortName">credit_updt</obj_property>
+   </wvobject>
+   <wvobject type="array" fp_name="/traffic_gen_tb/ctrlreg">
+      <obj_property name="ElementShortName">ctrlreg[31:0]</obj_property>
+      <obj_property name="ObjectShortName">ctrlreg[31:0]</obj_property>
+   </wvobject>
+   <wvobject type="logic" fp_name="/traffic_gen_tb/err1">
+      <obj_property name="ElementShortName">err1</obj_property>
+      <obj_property name="ObjectShortName">err1</obj_property>
+   </wvobject>
+   <wvobject type="logic" fp_name="/traffic_gen_tb/err2">
+      <obj_property name="ElementShortName">err2</obj_property>
+      <obj_property name="ObjectShortName">err2</obj_property>
+   </wvobject>
+   <wvobject type="array" fp_name="/traffic_gen_tb/len">
+      <obj_property name="ElementShortName">len[31:0]</obj_property>
+      <obj_property name="ObjectShortName">len[31:0]</obj_property>
+   </wvobject>
+   <wvobject type="array" fp_name="/traffic_gen_tb/num_pkt">
+      <obj_property name="ElementShortName">num_pkt[31:0]</obj_property>
+      <obj_property name="ObjectShortName">num_pkt[31:0]</obj_property>
+      <obj_property name="Radix">UNSIGNEDDECRADIX</obj_property>
+   </wvobject>
+   <wvobject type="logic" fp_name="/traffic_gen_tb/resetn">
+      <obj_property name="ElementShortName">resetn</obj_property>
+      <obj_property name="ObjectShortName">resetn</obj_property>
+   </wvobject>
+   <wvobject type="array" fp_name="/traffic_gen_tb/rx_data">
+      <obj_property name="ElementShortName">rx_data[511:0]</obj_property>
+      <obj_property name="ObjectShortName">rx_data[511:0]</obj_property>
+   </wvobject>
+   <wvobject type="logic" fp_name="/traffic_gen_tb/rx_end">
+      <obj_property name="ElementShortName">rx_end</obj_property>
+      <obj_property name="ObjectShortName">rx_end</obj_property>
+   </wvobject>
+   <wvobject type="logic" fp_name="/traffic_gen_tb/rx_last">
+      <obj_property name="ElementShortName">rx_last</obj_property>
+      <obj_property name="ObjectShortName">rx_last</obj_property>
+   </wvobject>
+   <wvobject type="logic" fp_name="/traffic_gen_tb/rx_ready">
+      <obj_property name="ElementShortName">rx_ready</obj_property>
+      <obj_property name="ObjectShortName">rx_ready</obj_property>
+   </wvobject>
+   <wvobject type="logic" fp_name="/traffic_gen_tb/rx_valid">
+      <obj_property name="ElementShortName">rx_valid</obj_property>
+      <obj_property name="ObjectShortName">rx_valid</obj_property>
+   </wvobject>
+   <wvobject type="array" fp_name="/traffic_gen_tb/txr_size">
+      <obj_property name="ElementShortName">txr_size[15:0]</obj_property>
+      <obj_property name="ObjectShortName">txr_size[15:0]</obj_property>
+   </wvobject>
+   <wvobject type="array" fp_name="/traffic_gen_tb/dut/curr_state">
+      <obj_property name="ElementShortName">curr_state[2:0]</obj_property>
+      <obj_property name="ObjectShortName">curr_state[2:0]</obj_property>
+   </wvobject>
+   <wvobject type="array" fp_name="/traffic_gen_tb/dut/cycles_per_pkt">
+      <obj_property name="ElementShortName">cycles_per_pkt[31:0]</obj_property>
+      <obj_property name="ObjectShortName">cycles_per_pkt[31:0]</obj_property>
+      <obj_property name="Radix">SIGNEDDECRADIX</obj_property>
+   </wvobject>
+   <wvobject type="array" fp_name="/traffic_gen_tb/dut/counter_wait">
+      <obj_property name="ElementShortName">counter_wait[31:0]</obj_property>
+      <obj_property name="ObjectShortName">counter_wait[31:0]</obj_property>
+      <obj_property name="Radix">SIGNEDDECRADIX</obj_property>
+   </wvobject>
+   <wvobject type="array" fp_name="/traffic_gen_tb/num_queue">
+      <obj_property name="ElementShortName">num_queue[10:0]</obj_property>
+      <obj_property name="ObjectShortName">num_queue[10:0]</obj_property>
+   </wvobject>
+   <wvobject type="array" fp_name="/traffic_gen_tb/qid">
+      <obj_property name="ElementShortName">qid[10:0]</obj_property>
+      <obj_property name="ObjectShortName">qid[10:0]</obj_property>
+   </wvobject>
+   <wvobject type="array" fp_name="/traffic_gen_tb/rx_qid">
+      <obj_property name="ElementShortName">rx_qid[10:0]</obj_property>
+      <obj_property name="ObjectShortName">rx_qid[10:0]</obj_property>
+   </wvobject>
+   <wvobject type="array" fp_name="/traffic_gen_tb/dut/counter_trans">
+      <obj_property name="ElementShortName">counter_trans[15:0]</obj_property>
+      <obj_property name="ObjectShortName">counter_trans[15:0]</obj_property>
+   </wvobject>
+   <wvobject type="array" fp_name="/traffic_gen_tb/dut/cycles_per_pkt">
+      <obj_property name="ElementShortName">cycles_per_pkt[31:0]</obj_property>
+      <obj_property name="ObjectShortName">cycles_per_pkt[31:0]</obj_property>
+   </wvobject>
+   <wvobject type="array" fp_name="/traffic_gen_tb/dut/cycles_needed">
+      <obj_property name="ElementShortName">cycles_needed[31:0]</obj_property>
+      <obj_property name="ObjectShortName">cycles_needed[31:0]</obj_property>
+   </wvobject>
+   <wvobject type="array" fp_name="/traffic_gen_tb/hash_val">
+      <obj_property name="ElementShortName">hash_val[31:0]</obj_property>
+      <obj_property name="ObjectShortName">hash_val[31:0]</obj_property>
+   </wvobject>
+   <wvobject type="array" fp_name="/traffic_gen_tb/dut/src_ip_addr">
+      <obj_property name="ElementShortName">src_ip_addr[31:0]</obj_property>
+      <obj_property name="ObjectShortName">src_ip_addr[31:0]</obj_property>
+   </wvobject>
+   <wvobject type="array" fp_name="/traffic_gen_tb/dut/dst_ip_addr">
+      <obj_property name="ElementShortName">dst_ip_addr[31:0]</obj_property>
+      <obj_property name="ObjectShortName">dst_ip_addr[31:0]</obj_property>
+   </wvobject>
+   <wvobject type="array" fp_name="/traffic_gen_tb/dut/src_port">
+      <obj_property name="ElementShortName">src_port[15:0]</obj_property>
+      <obj_property name="ObjectShortName">src_port[15:0]</obj_property>
+   </wvobject>
+   <wvobject type="logic" fp_name="/traffic_gen_tb/dut/c2h_perform">
+      <obj_property name="ElementShortName">c2h_perform</obj_property>
+      <obj_property name="ObjectShortName">c2h_perform</obj_property>
+   </wvobject>
+   <wvobject type="logic" fp_name="/traffic_gen_tb/dut/crdt_valid">
+      <obj_property name="ElementShortName">crdt_valid</obj_property>
+      <obj_property name="ObjectShortName">crdt_valid</obj_property>
+   </wvobject>
+   <wvobject type="logic" fp_name="/traffic_gen_tb/tm_dsc_sts_vld">
+      <obj_property name="ElementShortName">tm_dsc_sts_vld</obj_property>
+      <obj_property name="ObjectShortName">tm_dsc_sts_vld</obj_property>
+   </wvobject>
+   <wvobject type="array" fp_name="/traffic_gen_tb/tm_dsc_sts_avl">
+      <obj_property name="ElementShortName">tm_dsc_sts_avl[15:0]</obj_property>
+      <obj_property name="ObjectShortName">tm_dsc_sts_avl[15:0]</obj_property>
+   </wvobject>
+   <wvobject type="array" fp_name="/traffic_gen_tb/tm_dsc_sts_qid">
+      <obj_property name="ElementShortName">tm_dsc_sts_qid[10:0]</obj_property>
+      <obj_property name="ObjectShortName">tm_dsc_sts_qid[10:0]</obj_property>
+   </wvobject>
+   <wvobject type="logic" fp_name="/traffic_gen_tb/dut/tm_update">
+      <obj_property name="ElementShortName">tm_update</obj_property>
+      <obj_property name="ObjectShortName">tm_update</obj_property>
+   </wvobject>
+   <wvobject type="logic" fp_name="/traffic_gen_tb/dut/tm_ready">
+      <obj_property name="ElementShortName">tm_ready</obj_property>
+      <obj_property name="ObjectShortName">tm_ready</obj_property>
+   </wvobject>
+   <wvobject type="logic" fp_name="/traffic_gen_tb/dut/updt_crdt">
+      <obj_property name="ElementShortName">updt_crdt</obj_property>
+      <obj_property name="ObjectShortName">updt_crdt</obj_property>
+   </wvobject>
+   <wvobject type="logic" fp_name="/traffic_gen_tb/dut/wr_conflict">
+      <obj_property name="ElementShortName">wr_conflict</obj_property>
+      <obj_property name="ObjectShortName">wr_conflict</obj_property>
+   </wvobject>
+   <wvobject type="array" fp_name="/traffic_gen_tb/dut/timestamp">
+      <obj_property name="ElementShortName">timestamp[79:0]</obj_property>
+      <obj_property name="ObjectShortName">timestamp[79:0]</obj_property>
+   </wvobject>
+   <wvobject type="array" fp_name="/traffic_gen_tb/dut/credit_reg">
+      <obj_property name="ElementShortName">credit_reg[0:15][31:0]</obj_property>
+      <obj_property name="ObjectShortName">credit_reg[0:15][31:0]</obj_property>
+   </wvobject>
+   <wvobject type="logic" fp_name="/traffic_gen_tb/qid_fifo_full">
+      <obj_property name="ElementShortName">qid_fifo_full</obj_property>
+      <obj_property name="ObjectShortName">qid_fifo_full</obj_property>
+   </wvobject>
+   <wvobject type="logic" fp_name="/traffic_gen_tb/empty">
+      <obj_property name="ElementShortName">empty</obj_property>
+      <obj_property name="ObjectShortName">empty</obj_property>
+   </wvobject>
+   <wvobject type="logic" fp_name="/traffic_gen_tb/cmpt_ready">
+      <obj_property name="ElementShortName">cmpt_ready</obj_property>
+      <obj_property name="ObjectShortName">cmpt_ready</obj_property>
+   </wvobject>
+   <wvobject type="array" fp_name="/traffic_gen_tb/cmpt_count">
+      <obj_property name="ElementShortName">cmpt_count[31:0]</obj_property>
+      <obj_property name="ObjectShortName">cmpt_count[31:0]</obj_property>
+   </wvobject>
+   <wvobject type="array" fp_name="/traffic_gen_tb/counter_cmpt">
+      <obj_property name="ElementShortName">counter_cmpt[9:0]</obj_property>
+      <obj_property name="ObjectShortName">counter_cmpt[9:0]</obj_property>
+   </wvobject>
+   <wvobject type="array" fp_name="/traffic_gen_tb/target_cmpt">
+      <obj_property name="ElementShortName">target_cmpt[9:0]</obj_property>
+      <obj_property name="ObjectShortName">target_cmpt[9:0]</obj_property>
+   </wvobject>
+   <wvobject type="logic" fp_name="/traffic_gen_tb/rx_begin">
+      <obj_property name="ElementShortName">rx_begin</obj_property>
+      <obj_property name="ObjectShortName">rx_begin</obj_property>
+   </wvobject>
+</wave_config>

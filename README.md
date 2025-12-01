@@ -2,19 +2,16 @@
 
 ## Hardware setup:
 
-<p>Files needed: HW/hdl/traffic_gen.sv, HW/hdl/imports..<br>
-Vivado version: v2021.2<br>
-Board: xcvc1902-vsva2197-2MP-e-S<br>
-QDMA IP setting: <br>
-  Queue DMA Subsystem for PCI Express (4.0); Mode: Advanced; PCIe Block Location: X0Y1; AXI Data Width: 512 bit; DMA Interface Selection: AXI Stream with Completion; <br>
-  PCIe: BARs: AXI Lite Master - 64 bit - Prefetchable - 4K;<br>
-  PCIe: DMA: Descriptor Bypass - None; Prefetch cache depth - 16; CMPT Coalesce Max buffer - 16;<br>
-  Other parameters are default.<br>
-1. Setup QDMA IP;<br>
-2. Generate QDMA example design;<br>
-3. Replace imports folder with HW/hdl/imports;<br>
-4. Add HW/hdl/traffic_gen.sv into design files;<br>
-5. Run synthesis & implementation, generate device image.</p>
+1. Clone the repo.
+2. Move the qdma_2_ex.tcl to the desired project path.
+3. Open vivado
+4. In the vivado terminal, type the following command:
+```tcl
+set origin_dir_loc [/path/to/repo/QDMA_Traffic_Gen]
+source qdma_2_ex.tcl
+```
+This will create the project folder under the current directory, e.g. ./qdma_2_ex.
+
 
 ## Software setup:
 
