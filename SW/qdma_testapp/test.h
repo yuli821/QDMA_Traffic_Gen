@@ -55,7 +55,7 @@
 #define H2C_STATUS_REG    0x10
 #define CYCLES_PER_PKT    0x1C
 #define C2H_NUM_QUEUES    0x28
-#define C2H_PACKET_COUNT_REG    0x20
+#define C2H_TRAFFIC_PATTERN_REG    0x20
 #define C2H_STATUS_REG                    0x18
 #define C2H_STREAM_MARKER_PKT_GEN_VAL     0x22
 #define MARKER_RESPONSE_COMPLETION_BIT    0x1
