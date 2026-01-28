@@ -164,7 +164,7 @@ int main(int argc, char* argv[]) {
     uint64_t interval_cycles = interval * hz;
 
     max_completion_size = pktsize; //datasize + headersize
-    PciWrite(user_bar_idx, C2H_PACKET_COUNT_REG, numpkts, port);
+    PciWrite(user_bar_idx, C2H_TRAFFIC_PATTERN_REG, 0, port);
     PciWrite(user_bar_idx, C2H_ST_LEN_REG, max_completion_size, port);
     PciWrite(user_bar_idx, CYCLES_PER_PKT, cycles, port);
     PciWrite(user_bar_idx, C2H_NUM_QUEUES, num_queues, port);

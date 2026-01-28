@@ -7,7 +7,7 @@
 3. Open vivado
 4. In the vivado terminal, type the following command:
 ```tcl
-set origin_dir_loc [/path/to/repo/QDMA_Traffic_Gen]
+set origin_dir_loc [/path/to/QDMA_Traffic_Gen]
 source qdma_2_ex.tcl
 ```
 This will create the project folder under the current directory, e.g. ./qdma_2_ex.
