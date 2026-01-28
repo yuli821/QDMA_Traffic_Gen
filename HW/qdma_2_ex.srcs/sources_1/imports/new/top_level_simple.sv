@@ -25,8 +25,6 @@ module top_level_simple(
     input logic         clk,
     input logic         rst,
 
-    input logic         c2h_dsc_available,
-
     // H2C (QDMA -> TCP)
     input logic [511:0] m_axis_h2c_tdata,
     input logic [31:0]  m_axis_h2c_tcrc,
@@ -88,6 +86,7 @@ rx_datapath rx_datapath_i (
     .m_axis_h2c_tlast           (m_axis_h2c_tlast),
     .m_axis_h2c_tready          (m_axis_h2c_tready),
 
+    .fifo_we    (),
     .l2_hdr     (rx_l2_hdr),
     .ipv4_hdr   (rx_ipv4_hdr),
     .tcp_hdr    (rx_tcp_hdr),
@@ -97,7 +96,6 @@ rx_datapath rx_datapath_i (
 tx_datapath tx_datapath_i (
     .clk                        (clk),
     .rst                        (rst),
-    .c2h_dsc_available          (c2h_dsc_available),
     .sent                       (sent),
     .s_axis_c2h_tready          (s_axis_c2h_tready),
     .s_axis_c2h_tdata           (s_axis_c2h_tdata),
@@ -111,9 +109,6 @@ tx_datapath tx_datapath_i (
     .s_axis_c2h_mty             (s_axis_c2h_mty),
     .s_axis_c2h_tvalid          (s_axis_c2h_tvalid),
     .s_axis_c2h_tlast           (s_axis_c2h_tlast),
-    //Added
-    .local_seq_num              (local_seq_num),
-    .remote_ack_num             (remote_seq_num),
 
     .l2_hdr                     (rx_l2_hdr_d),
     .ipv4_hdr                   (rx_ipv4_hdr_d),
@@ -141,9 +136,6 @@ typedef enum logic [3:0] {
 state_t curr_t, next_t;
 
 tcp_csr_t  last_sent;
-//Added
-logic [31:0] local_seq_num;
-logic [31:0] remote_seq_num;
 
 localparam tcp_csr_t CSR_SYN     = '{syn:1'b1, ack:1'b0, rst:1'b0, fin:1'b0};
 localparam tcp_csr_t CSR_ACK     = '{syn:1'b0, ack:1'b1, rst:1'b0, fin:1'b0};
@@ -157,255 +149,116 @@ always_ff @(posedge clk) begin
     rx_tcp_hdr_d    <= rx_tcp_hdr;
 end
 
-// Add as separate always_comb block
-logic [15:0] payload_len;
-
-always_comb begin
-    logic [15:0] ip_total, ip_hdr, tcp_hdr;
-    ip_total = rx_ipv4_hdr_d.total_len;  // Use delayed version for timing
-    ip_hdr = {rx_ipv4_hdr_d.ihl, 2'b00};
-    tcp_hdr = {rx_tcp_hdr_d.data_off, 2'b00};
-    payload_len = ip_total - ip_hdr - tcp_hdr;
-end
-
 always_ff @(posedge clk) begin
     // STATE TRANSITION
     if (rst) begin
         curr_t  <= CLOSED;
         state_entry <= 1'b1;
-
-        // Control signals
-        tx_tcp_csr      <= '0;
-        last_sent       <= '0;
-        
-        // Sequence numbers
-        local_seq_num   <= 32'hDEADBEEF;
-        remote_seq_num  <= '0;
     end
     else begin
-        // state transition
         state_entry <= (next_t != curr_t);
         curr_t  <= next_t;
-        
-        // if (m_axis_h2c_tvalid && m_axis_h2c_tready && (rx_tcp_csr.syn || rx_tcp_csr.fin)) begin
-        //     remote_seq_num <= rx_tcp_hdr.seq_num + 1;
-        // end
-
-        // Default
-        tx_tcp_csr <= '0;
-        case (curr_t)
-            CLOSED: begin
-                if (state_entry) begin 
-                    last_sent <= '0;
-                end
-
-                if (rx_tcp_csr.syn || rx_tcp_csr.ack || rx_tcp_csr.fin) begin 
-                    tx_tcp_csr <= CSR_RST;
-                end
-            end
-            LISTEN: begin
-                if (rx_tcp_csr.syn) begin 
-                    tx_tcp_csr <= CSR_SYN_ACK;
-                    last_sent <= CSR_SYN_ACK;
-                    local_seq_num <= local_seq_num + 1; //SYN consumes 1 seq number
-                    remote_seq_num <= rx_tcp_hdr.seq_num + 1;
-                end
-                else if (rx_tcp_csr.fin || rx_tcp_csr.ack) begin 
-                    tx_tcp_csr <= CSR_RST;
-                end
-            end
-            SYN_RECV: begin
-                if (rx_tcp_csr.syn && !rx_tcp_csr.rst) begin 
-                    tx_tcp_csr <= last_sent;
-                end else if (rx_tcp_csr.fin)begin
-                    tx_tcp_csr <= CSR_RST;
-                end
-            end
-            SYN_SENT: begin
-                if (state_entry) begin 
-                    tx_tcp_csr <= CSR_SYN;
-                    last_sent <= CSR_SYN;
-                    local_seq_num <= local_seq_num + 1; //SYN consumes 1 seq number
-                end
-                else if (rx_tcp_csr.syn && rx_tcp_csr.ack) begin 
-                    tx_tcp_csr <= CSR_ACK;
-                end
-                else if (rx_tcp_csr.syn && !rx_tcp_csr.ack) begin 
-                    tx_tcp_csr <= CSR_SYN_ACK;
-                    last_sent <= CSR_SYN_ACK;
-                    local_seq_num <= local_seq_num + 1; //SYN consumes 1 seq number
-                end
-            end
-            ESTABLISHED: begin
-                // ACK any received data
-                if (m_axis_h2c_tvalid && m_axis_h2c_tready && (payload_len > 0)) begin
-                    remote_seq_num <= rx_tcp_hdr_d.seq_num + payload_len;
-                    tx_tcp_csr <= CSR_ACK;
-                end
-                
-                if (rx_tcp_csr.fin) begin 
-                    remote_seq_num <= remote_seq_num + 1;  // FIN consumes 1 SEQ
-                    tx_tcp_csr <= CSR_ACK;
-                end
-
-                // if (rx_tcp_csr.fin) begin 
-                //     tx_tcp_csr <= CSR_ACK;
-                // end
-                // else if (rx_tcp_csr.syn && !rx_tcp_csr.ack) begin 
-                //     tx_tcp_csr <= CSR_RST;
-                // end
-            end
-            FIN_1: begin
-                if (state_entry) begin 
-                    tx_tcp_csr <= CSR_FIN;
-                    last_sent <= CSR_FIN;
-                    local_seq_num <= local_seq_num + 1; //FIN consumes 1 seq number
-                end
-                else if (rx_tcp_csr.fin) begin 
-                    tx_tcp_csr <= CSR_ACK;
-                end
-            end
-            FIN_2: begin
-                if (rx_tcp_csr.fin) begin 
-                    tx_tcp_csr <= CSR_ACK;
-                end
-            end
-            CLOSING: begin
-                if (rx_tcp_csr.fin) begin 
-                    tx_tcp_csr <= CSR_ACK;
-                end
-            end
-            LAST_ACK: begin
-                if (state_entry) begin 
-                    tx_tcp_csr <= CSR_FIN;
-                    last_sent <= CSR_FIN;
-                    local_seq_num <= local_seq_num + 1; //FIN consumes 1 seq number
-                end
-                else if (rx_tcp_csr.fin) begin 
-                    tx_tcp_csr <= CSR_ACK;
-                end
-            end
-            default: begin
-            end
-        endcase
     end
 
-    //Added
-    // // RESET SEND SIGNAL
-    // if (rst || sent) begin
-    //     tx_tcp_csr  <= '0;
-    // end
+    // RESET SEND SIGNAL
+    if (rst || sent) begin
+        tx_tcp_csr  <= '0;
+    end
 
-    // if (rst) begin
-    //     last_sent   <= '0;
-    // end 
-    // //Added
-    // if (rst) begin 
-    //     local_seq_num <= 32'hDEADBEEF;
-    //     remote_seq_num <= '0;
-    // end
-    // else begin 
-    //     // Track remote's next expected SEQ (only when valid RX)
-    //     if (m_axis_h2c_tvalid && m_axis_h2c_tready && (rx_tcp_csr.syn || rx_tcp_csr.fin)) begin
-    //         remote_seq_num <= rx_tcp_hdr.seq_num + 1;
-    //     end
-        
-    //     // Increment our SEQ when we send SYN or FIN (they consume 1 seq number)
-    //     if ((tx_tcp_csr.syn || tx_tcp_csr.fin) && !sent) begin
-    //         local_seq_num <= local_seq_num + 1;
-    //     end
-    // end
+    if (rst) begin
+        last_sent   <= '0;
+    end 
 
-    // /*
-    //     FIXME: Gate with Valid?
-    //     Track the last control flags so duplicates can be answered without delay.
-    // */
-    // tx_tcp_csr <= '0;
-    // case (curr_t)
-    //     CLOSED : begin
-    //         if (state_entry) begin
-    //             last_sent <= '0;
-    //         end
+    /*
+        FIXME: Gate with Valid?
+        Track the last control flags so duplicates can be answered without delay.
+    */
+    tx_tcp_csr <= '0;
+    case (curr_t)
+        CLOSED : begin
+            if (state_entry) begin
+                last_sent <= '0;
+            end
 
-    //         if (rx_tcp_csr.syn || rx_tcp_csr.ack || rx_tcp_csr.fin) begin
-    //             tx_tcp_csr <= CSR_RST;
-    //         end
-    //     end
-    //     LISTEN : begin
-    //         if (rx_tcp_csr.syn) begin // send syn ack
-    //             tx_tcp_csr <= CSR_SYN_ACK;
-    //             last_sent  <= CSR_SYN_ACK;
-    //         end
-    //         else if (rx_tcp_csr.fin || rx_tcp_csr.ack) begin
-    //             tx_tcp_csr <= CSR_RST;
-    //         end
-    //     end
-    //     SYN_RECV : begin
-    //         if (rx_tcp_csr.syn && !rx_tcp_csr.rst) begin
-    //             if (last_sent == '0) begin
-    //                 tx_tcp_csr <= CSR_SYN_ACK;
-    //                 last_sent  <= CSR_SYN_ACK;
-    //             end
-    //             else begin
-    //                 tx_tcp_csr <= last_sent;
-    //             end
-    //         end
-    //         else if (rx_tcp_csr.fin) begin
-    //             tx_tcp_csr <= CSR_RST;
-    //         end
-    //     end
-    //     SYN_SENT : begin
-    //         if (state_entry) begin
-    //             tx_tcp_csr <= CSR_SYN;
-    //             last_sent  <= CSR_SYN;
-    //         end
-    //         else if (rx_tcp_csr.syn && rx_tcp_csr.ack) begin
-    //             tx_tcp_csr <= CSR_ACK;
-    //         end
-    //         else if (rx_tcp_csr.syn && !rx_tcp_csr.ack) begin
-    //             tx_tcp_csr <= CSR_SYN_ACK;
-    //             last_sent  <= CSR_SYN_ACK;
-    //         end
-    //     end
-    //     ESTABLISHED : begin
-    //         if (rx_tcp_csr.fin) begin
-    //             tx_tcp_csr <= CSR_ACK;
-    //         end
-    //         else if (rx_tcp_csr.syn && !rx_tcp_csr.ack) begin
-    //             tx_tcp_csr <= CSR_RST;
-    //         end
-    //     end
-    //     FIN_1 : begin
-    //         if (state_entry) begin
-    //             tx_tcp_csr <= CSR_FIN;
-    //             last_sent  <= CSR_FIN;
-    //         end
-    //         else if (rx_tcp_csr.fin) begin
-    //             tx_tcp_csr <= CSR_ACK;
-    //         end
-    //     end
-    //     FIN_2 : begin
-    //         if (rx_tcp_csr.fin) begin
-    //             tx_tcp_csr <= CSR_ACK;
-    //         end
-    //     end
-    //     CLOSING : begin
-    //         if (rx_tcp_csr.fin) begin
-    //             tx_tcp_csr <= CSR_ACK;
-    //         end
-    //     end
-    //     LAST_ACK : begin
-    //         if (state_entry) begin
-    //             tx_tcp_csr <= CSR_FIN;
-    //             last_sent  <= CSR_FIN;
-    //         end
-    //         else if (rx_tcp_csr.fin) begin
-    //             tx_tcp_csr <= CSR_ACK;
-    //         end
-    //     end
-    //     default : begin
-    //     end
-    // endcase
+            if (rx_tcp_csr.syn || rx_tcp_csr.ack || rx_tcp_csr.fin) begin
+                tx_tcp_csr <= CSR_RST;
+            end
+        end
+        LISTEN : begin
+            if (rx_tcp_csr.syn) begin // send syn ack
+                tx_tcp_csr <= CSR_SYN_ACK;
+                last_sent  <= CSR_SYN_ACK;
+            end
+            else if (rx_tcp_csr.fin || rx_tcp_csr.ack) begin
+                tx_tcp_csr <= CSR_RST;
+            end
+        end
+        SYN_RECV : begin
+            if (rx_tcp_csr.syn && !rx_tcp_csr.rst) begin
+                if (last_sent == '0) begin
+                    tx_tcp_csr <= CSR_SYN_ACK;
+                    last_sent  <= CSR_SYN_ACK;
+                end
+                else begin
+                    tx_tcp_csr <= last_sent;
+                end
+            end
+            else if (rx_tcp_csr.fin) begin
+                tx_tcp_csr <= CSR_RST;
+            end
+        end
+        SYN_SENT : begin
+            if (state_entry) begin
+                tx_tcp_csr <= CSR_SYN;
+                last_sent  <= CSR_SYN;
+            end
+            else if (rx_tcp_csr.syn && rx_tcp_csr.ack) begin
+                tx_tcp_csr <= CSR_ACK;
+            end
+            else if (rx_tcp_csr.syn && !rx_tcp_csr.ack) begin
+                tx_tcp_csr <= CSR_SYN_ACK;
+                last_sent  <= CSR_SYN_ACK;
+            end
+        end
+        ESTABLISHED : begin
+            if (rx_tcp_csr.fin) begin
+                tx_tcp_csr <= CSR_ACK;
+            end
+            else if (rx_tcp_csr.syn && !rx_tcp_csr.ack) begin
+                tx_tcp_csr <= CSR_RST;
+            end
+        end
+        FIN_1 : begin
+            if (state_entry) begin
+                tx_tcp_csr <= CSR_FIN;
+                last_sent  <= CSR_FIN;
+            end
+            else if (rx_tcp_csr.fin) begin
+                tx_tcp_csr <= CSR_ACK;
+            end
+        end
+        FIN_2 : begin
+            if (rx_tcp_csr.fin) begin
+                tx_tcp_csr <= CSR_ACK;
+            end
+        end
+        CLOSING : begin
+            if (rx_tcp_csr.fin) begin
+                tx_tcp_csr <= CSR_ACK;
+            end
+        end
+        LAST_ACK : begin
+            if (state_entry) begin
+                tx_tcp_csr <= CSR_FIN;
+                last_sent  <= CSR_FIN;
+            end
+            else if (rx_tcp_csr.fin) begin
+                tx_tcp_csr <= CSR_ACK;
+            end
+        end
+        default : begin
+        end
+    endcase
 end
 
 always_comb begin
@@ -430,9 +283,7 @@ always_comb begin
             end
         end
         SYN_RECV : begin
-            //Added
-            // if (rx_tcp_csr.ack) begin
-            if (rx_tcp_csr.ack && (rx_tcp_hdr.ack_num == local_seq_num)) begin
+            if (rx_tcp_csr.ack) begin
                 next_t = ESTABLISHED;
             end
             else if (rx_tcp_csr.rst) begin

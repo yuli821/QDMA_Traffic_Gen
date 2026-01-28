@@ -24,56 +24,78 @@ module tcb(
     input logic             clk,
     input logic             rst,
     
-    output logic            readya,
-    input logic             valida,
     input logic [5:0]       addra,
     input logic             wea,
     input tcb_t             dina,
     output tcb_t            douta,
-    output logic            douta_valid,
 
-    input logic             validb,
     input logic [5:0]       addrb,
-    input logic             web,
-    input tcb_t             dinb,
-    output tcb_t            doutb,
-    output logic            doutb_valid
+    output tcb_t            doutb
 );
 
-blk_mem_gen_1 tcb (
-    .clka   (clk),
-    .addra  (addra),
-    .wea    (wea),
-    .dina   (unpack_a),
-    .douta  (pack_a),
+localparam int TCB_WIDTH = 391;
 
-    .clkb   (clk),
-    .addrb  (addrb),
-    .web    (web),
-    .dinb   (dinb),
-    .doutb  (doutb)
+// blk_mem_gen_1 tcb (
+//     .clka   (clk),
+//     .addra  (addra),
+//     .wea    (wea), // && !drop_a),
+//     .dina   (dina), // unpack_a),
+//     .douta  (douta), // pack_a),
+//
+//     .clkb   (clk),
+//     .addrb  (addrb), // addrb_mux),
+//     .web    ('0), // web),
+//     .dinb   (), // dinb),
+//     .doutb  (doutb)
+// );
+
+xpm_memory_tdpram #(
+    .ADDR_WIDTH_A        (6),
+    .ADDR_WIDTH_B        (6),
+    .AUTO_SLEEP_TIME     (0),
+    .BYTE_WRITE_WIDTH_A  (TCB_WIDTH),
+    .BYTE_WRITE_WIDTH_B  (TCB_WIDTH),
+    .CLOCKING_MODE       ("independent_clock"),
+    .ECC_MODE            ("no_ecc"),
+    .MEMORY_INIT_FILE    ("none"),
+    .MEMORY_INIT_PARAM   ("0"),
+    .MEMORY_OPTIMIZATION ("true"),
+    .MEMORY_PRIMITIVE    ("block"),
+    .MEMORY_SIZE         (TCB_WIDTH * 64),
+    .MESSAGE_CONTROL     (0),
+    .READ_DATA_WIDTH_A   (TCB_WIDTH),
+    .READ_DATA_WIDTH_B   (TCB_WIDTH),
+    .READ_LATENCY_A      (1),
+    .READ_LATENCY_B      (1),
+    .READ_RESET_VALUE_A  ("0"),
+    .READ_RESET_VALUE_B  ("0"),
+    .RST_MODE_A          ("SYNC"),
+    .RST_MODE_B          ("SYNC"),
+    .SIM_ASSERT_CHK      (0),
+    .USE_MEM_INIT        (0),
+    .WAKEUP_TIME         ("disable_sleep"),
+    .WRITE_DATA_WIDTH_A  (TCB_WIDTH),
+    .WRITE_DATA_WIDTH_B  (TCB_WIDTH),
+    .WRITE_MODE_A        ("write_first"),
+    .WRITE_MODE_B        ("write_first")
+) tcb_mem (
+    .clka           (clk),
+    .clkb           (clk),
+    .ena            (1'b1),
+    .enb            (1'b1),
+    .addra          (addra),
+    .addrb          (addrb),
+    .dina           (dina),
+    .dinb           ('0),
+    .wea            (wea),
+    .web            (1'b0),
+    .douta          (douta),
+    .doutb          (doutb),
+    .regcea         (1'b1),
+    .regceb         (1'b1),
+    .rsta           (rst),
+    .rstb           (rst),
+    .sleep          (1'b0)
 );
-
-/*
-    On ingress of invalid data/packet
-    -> if RX is not RST, immediately respond with RST
-    -> invalidate TCB entry
-    -> invalidate cache entry
-
-    On egress
-    -> Update TCB state to next state
-*/
-
-logic [1023:0]  unpack_a;
-logic [1023:0]  pack_a;
-
-assign unpack_a = {'0, dina};
-assign douta    = pack_a;
-assign readya   = ~(valida || douta_valid);
-
-always_ff @(posedge clk) begin
-    douta_valid     <= valida;
-    doutb_valid     <= validb;
-end
 
 endmodule

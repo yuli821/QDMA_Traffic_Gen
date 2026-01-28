@@ -19,7 +19,7 @@
 // 
 //////////////////////////////////////////////////////////////////////////////////
 
-
+import packages::*;
 module writeback(
     input logic         clk,
     input logic         rst,
@@ -30,9 +30,8 @@ module writeback(
     // RX DATAPATH
     input logic         tcb_valid_rx,
     input logic [5:0]   tcb_addr_rx,
-    input tcb_t         tcb_in_rx,
 
-    // TX DATAPATH
+    // RTO / TX DATAPATH
     input logic         tcb_valid_tx,
     input logic [5:0]   tcb_addr_tx,
     input tcb_t         tcb_in_tx,
@@ -43,45 +42,71 @@ module writeback(
     //      0 - TX
     //      1 - RX
     output logic        path,
-    output logic        valida,
-    output logic [5:0]  addra,
-    output logic        wea,
-    output tcb_t        tcb_out
+    output logic        valid,
+    output logic [5:0]  addr
 );
 
-fifo_generator_2 tx_wb_i (
+logic [5:0] tcb_addr_out_tx;
+logic [5:0] tcb_addr_out_rto;
+
+logic fifo_wr_en_tx;
+logic fifo_advance_tx;
+logic fifo_empty_tx;
+logic fifo_valid_tx;
+
+logic fifo_wr_en_rto;
+logic fifo_advance_rto;
+logic fifo_empty_rto;
+logic fifo_valid_rto;
+
+fifo #(
+    .WIDTH  (8),
+    .DEPTH  (64),
+    .FWFT   (1)
+) tx_wb_i (
     .clk        (clk),
     .srst       (rst),
-
+    .din        (tcb_addr_tx),
+    .wr_en      (fifo_wr_en_tx),
+    .rd_en      (fifo_advance_tx),
+    .dout       (tcb_addr_out_tx),
     .full       (),
-    .din        (tcb_in_tx_updated),
-    .wr_en      (tcb_valid_tx),
-
-    .empty      (fifo_empty),
-    .dout       (tcb_fifo_out),
-    .rd_en      (fifo_advance),
-
-    .valid      (fifo_valid),
+    .empty      (fifo_empty_tx),
+    .valid      (fifo_valid_tx),
     .overflow   (),
     .wr_rst_busy(),
     .rd_rst_busy()
 );
 
-/*
-    Update before entering FIFO
-    Update may take a few cycles which can be
-    hidden by the FIFO
-*/
-wb_t tcb_in_tx_updated;
-wb_t tcb_fifo_out;
-
-logic fifo_empty;
-logic fifo_valid;
-logic fifo_advance;
+fifo #(
+    .WIDTH  (8),
+    .DEPTH  (32),
+    .FWFT   (1)
+) rto_wb_i (
+    .clk        (clk),
+    .srst       (rst),
+    .din        (tcb_addr_tx),
+    .wr_en      (fifo_wr_en_rto),
+    .rd_en      (fifo_advance_rto),
+    .dout       (tcb_addr_out_rto),
+    .full       (),
+    .empty      (fifo_empty_rto),
+    .valid      (fifo_valid_rto),
+    .overflow   (),
+    .wr_rst_busy(),
+    .rd_rst_busy()
+);
 
 always_comb begin
-    tcb_in_tx_updated.tcb_addr   = tcb_addr_tx;
-    tcb_in_tx_updated.tcb        = tcb_in_tx;
+    fifo_wr_en_tx  = '0;
+    fifo_wr_en_rto  = '0;
+
+    if (tcb_valid_tx && tcb_in_tx.backoff_exp < 2) begin
+        fifo_wr_en_tx   = 1'b1;
+    end
+    else if (tcb_valid_tx && tcb_in_tx.backoff_exp >= 2) begin
+        fifo_wr_en_rto  = 1'b1;
+    end
 end
 
 always_comb begin
@@ -90,33 +115,43 @@ always_comb begin
         RX has entire data, TX only needs few snippets which
         can be stored in a FIFO with little cost.
     */
-    fifo_advance    = '0;
-    tcb_out         = '0;
-    addra           = '0;
-    valida          = '0;
-    wea             = '0;
+    fifo_advance_tx     = 1'b0;
+    fifo_advance_rto    = 1'b0;
+    addr            = '0;
+    valid           = '0;
     path            = '0;
 
     if (tcb_valid_rx) begin
-        tcb_out = tcb_in_rx;
-        addra   = tcb_addr_rx;
-        valida  = 1'b1;
-        wea     = 1'b1;
+        fifo_advance_tx = 1'b0;
+        addr    = tcb_addr_rx;
+        valid   = 1'b1;
         path    = 1'b1;
     end
-    else if (fifo_valid && ~fifo_empty) begin
-        if (tcb_alloc[tcb_fifo_out.tcb_addr]) begin
-            fifo_advance    = 1'b1;
-            tcb_out         = tcb_fifo_out.tcb;
-            addra           = tcb_fifo_out.tcb_addr;
-            valida          = 1'b1;
-            wea             = 1'b1;
+    else if (fifo_valid_rto || ~fifo_empty_rto) begin
+        fifo_advance_rto = 1'b1;
+
+        if (tcb_alloc[tcb_addr_out_rto]) begin
+            addr            = tcb_addr_out_rto;
+            valid           = fifo_valid_rto;
             path            = 1'b0;
         end
-        else if (!tcb_alloc[tcb_fifo_out.tcb_addr]) begin
+        else if (!tcb_alloc[tcb_addr_out_rto]) begin
             // Advance if TCB alloc is invalid but do not write
-            fifo_advance    = 1'b1;
-            valida          = 1'b0;
+            valid           = 1'b0;
+            path            = 1'b0;
+        end
+    end
+    else if (fifo_valid_tx || ~fifo_empty_tx) begin
+        fifo_advance_tx = 1'b1;
+
+        if (tcb_alloc[tcb_addr_out_tx]) begin
+            addr            = tcb_addr_out_tx;
+            valid           = fifo_valid_tx;
+            path            = 1'b0;
+        end
+        else if (!tcb_alloc[tcb_addr_out_tx]) begin
+            // Advance if TCB alloc is invalid but do not write
+            valid           = 1'b0;
             path            = 1'b0;
         end
     end

@@ -178,7 +178,6 @@ set_property LOC GTY_QUAD_X0Y3 [get_cells [get_cells -hierarchical -filter PRIMI
 
 
 
-create_clock -period 10.000 -name sys_clk [get_ports sys_clk_p]
 
 ####################################################################################
 # Constraints from file : 'xpm_cdc_async_rst.tcl'
@@ -187,4 +186,14 @@ create_clock -period 10.000 -name sys_clk [get_ports sys_clk_p]
 
 
 
+
+
+
+create_clock -period 10.000 -name sys_clk [get_ports sys_clk_p]
+
+####################################################################################
+# Constraints from file : 'xpm_cdc_array_single.tcl'
+####################################################################################
+
+set_property LOC SLICE_X1Y252 [get_cells {qdma_ep_i/qdma_2_support/pcie/inst/serial_pcie_top.pcie4_xpipeif_inst/pipe_txeq_postcursor_o_reg[14]_replica}]
 
