@@ -19,8 +19,6 @@
 //
 //////////////////////////////////////////////////////////////////////////////////
 
-`ifndef PACKAGES_SVH
-`define PACKAGES_SVH
 package packages;
 
     localparam logic [15:0] ETH_TYPE_IPV4 = 16'h0800;
@@ -29,15 +27,16 @@ package packages;
     localparam logic [7:0] IP_PROTO_TCP   = 8'h06;
 
     typedef enum logic [3:0] {
+        // OPEN
         CLOSED,
         LISTEN,
         SYN_RECV,
         SYN_SENT,
 
-    // ESTABLISHED
+        // ESTABLISHED
         ESTABLISHED,
 
-    // CLOSE
+        // CLOSE
         FIN_1,
         FIN_2,
         CLOSING,
@@ -57,6 +56,7 @@ package packages;
     localparam tcp_csr_t CSR_ACK     = '{syn:1'b0, ack:1'b1, rst:1'b0, fin:1'b0};
     localparam tcp_csr_t CSR_SYN_ACK = '{syn:1'b1, ack:1'b1, rst:1'b0, fin:1'b0};
     localparam tcp_csr_t CSR_FIN     = '{syn:1'b0, ack:1'b0, rst:1'b0, fin:1'b1};
+    localparam tcp_csr_t CSR_FIN_ACK = '{syn:1'b0, ack:1'b1, rst:1'b0, fin:1'b1};
     localparam tcp_csr_t CSR_RST     = '{syn:1'b0, ack:1'b0, rst:1'b1, fin:1'b0};
 
     typedef struct packed {
@@ -102,6 +102,15 @@ package packages;
     } header_t;
 
     typedef struct packed {
+        logic       valid;
+        // 1 - Left
+        // 0 - Right
+        logic       side;
+        logic [1:0] way;
+        logic [3:0] set;
+    } cache_rmap_t;
+
+    typedef struct packed {
         logic [47:0]    dest_mac;
         logic [47:0]    src_mac;
         logic [31:0]    dest_ip;
@@ -112,8 +121,15 @@ package packages;
         tcp_state_t     tcp_curr_t;
         tcp_state_t     tcp_next_t;
 
+        // PAYLOAD LEN
         logic [31:0]    seq_num;
         logic [31:0]    ack_num;
+        logic [15:0]    len_num;
+
+        // SYN ACK
+        logic [31:0]    snd_una;
+        logic [31:0]    snd_nxt;
+        logic [31:0]    rcv_nxt;
 
         logic [5:0]     next_send_time;
         logic [4:0]     backoff_exp;
@@ -132,5 +148,10 @@ package packages;
         tcb_t       tcb;
     } wb_t;
 
+    typedef struct packed {
+        logic       path;
+        logic [5:0] tcb_addr;
+        tcb_t       tcb;
+    } tcb_mgr_t;
+
 endpackage : packages
-`endif

@@ -55,6 +55,7 @@
 
 `timescale 1ps / 1ps
 `include "qdma_stm_defines.svh"
+`include "types.svh"
 module qdma_app #(
   parameter TCQ                         = 1,
   parameter C_M_AXI_ID_WIDTH            = 4,
@@ -76,7 +77,9 @@ module qdma_app #(
   parameter C_H2C_TUSER_WIDTH = 55,
   parameter CRC_WIDTH         = 32,
   parameter TM_DSC_BITS       = 16,
-  parameter TDEST_BITS        = 16
+  parameter TDEST_BITS        = 16,
+
+  parameter NUM_FLOWS = 16
 )
 (
 
@@ -506,6 +509,9 @@ module qdma_app #(
   wire [31:0] read_addr;
   wire [31:0] rd_output;
 
+  flow_config_t flow_config [0:NUM_FLOWS-1];
+  logic [NUM_FLOWS-1:0] flow_running;
+
   wire c2h_perform;
   reg c2h_perform_d1;
   wire c2h_perform_pls_r;
@@ -613,13 +619,15 @@ module qdma_app #(
       )
   user_control_i
     (
+      .flow_config(flow_config),
+      .flow_running(flow_running),
       .rd_output(rd_output),
       .read_addr(read_addr),
       .c2h_perform(c2h_perform),
       .c2h_qid(c2h_qid),
       .hash_val(hash_val),
      .c2h_num_queue(c2h_num_queue),
-     .cycles_per_pkt(cycles_per_pkt),
+    //  .cycles_per_pkt(cycles_per_pkt),
      .axi_aclk (clk),
      .axi_aresetn    (user_resetn),
      .single_bit_err_inject_reg (),
@@ -822,13 +830,15 @@ module qdma_app #(
     )
   axi_st_module_i
   (
+    .flow_config(flow_config),
+    .flow_running(flow_running),
     .traffic_pattern(traffic_pattern),
     .cycles_per_pkt_2(cycles_per_pkt_2),
     .rd_output(rd_output),
     .read_addr(read_addr),
     .c2h_perform(c2h_perform),
     .c2h_num_queue(c2h_num_queue),
-    .cycles_per_pkt(cycles_per_pkt),
+    // .cycles_per_pkt(cycles_per_pkt),
     .axi_aresetn (mid_reset_n),
     .axi_aclk (user_clk),
     .c2h_st_qid (c2h_st_qid),

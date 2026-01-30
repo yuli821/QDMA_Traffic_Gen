@@ -53,12 +53,18 @@
 // Version    : 5.0
 //-----------------------------------------------------------------------------
 `timescale 1ps / 1ps
+`include "types.svh"
 
 module user_control 
   #(
     parameter C_DATA_WIDTH = 64,
     parameter QID_MAX = 64,
     parameter TM_DSC_BITS = 16,
+    parameter NUM_FLOWS = 16,
+    parameter GLOBAL_DST_IP = 32'hC0A8640A,
+    parameter GLOBAL_DST_PORT = 16'h1234,
+    parameter GLOBAL_PROTOCOL = 8'h6,
+    parameter GLOBAL_DST_MAC = 48'h001112345678,
     parameter PF0_M_AXILITE_ADDR_MSK    =  32'h000FFFFF,
     parameter PF1_M_AXILITE_ADDR_MSK    =  32'h000FFFFF,
     parameter PF2_M_AXILITE_ADDR_MSK    =  32'h000FFFFF,
@@ -147,7 +153,7 @@ module user_control
     output reg [31:0]  single_bit_err_inject_reg,
     output reg [31:0]  double_bit_err_inject_reg,
 
-    output reg [31:0] cycles_per_pkt,
+   //  output reg [31:0] cycles_per_pkt,
     output reg [31:0] traffic_pattern,
     output reg [31:0] src_ip,
     output reg [31:0] dst_ip,
@@ -160,7 +166,9 @@ module user_control
     output reg c2h_perform,
     output [31:0] read_addr,
     input [31:0] rd_output,
-    output reg [10:0] c2h_num_queue
+    output reg [10:0] c2h_num_queue,
+    output flow_config_t flow_config [0:NUM_FLOWS-1],
+    output logic [NUM_FLOWS-1:0] flow_running
     );
 
    reg [31:0] 	       control_reg_h2c;
@@ -214,10 +222,14 @@ module user_control
    wire [31:0] qdma_net_mac_hi;
    wire [31:0] qdma_net_mac_lo;
    wire [31:0] link_status_reg;
+   reg [NUM_FLOWS-1:0] flow_running_reg;
+   flow_config_t flow_config_reg [0:NUM_FLOWS-1];
    assign c2h_qid = rss_indir_table[hash_idx];
    assign qdma_net_mac_lo[31:0] = 32'h12345678; //8E8
    assign qdma_net_mac_hi[31:0] = 32'h00000011; //8EC
    assign link_status_reg = 32'h00000001; //8F0
+   assign flow_running = flow_running_reg;
+   assign flow_config = flow_config_reg;
    // Interpreting request on the axilite master interface
    wire [31:0] wr_addr;
    wire [31:0] rd_addr;
@@ -240,6 +252,18 @@ module user_control
                     ((m_axil_araddr >= PF2_VF_PCIEBAR2AXIBAR) && (m_axil_araddr < PF3_VF_PCIEBAR2AXIBAR)) ? (m_axil_araddr & PF2_VF_M_AXILITE_ADDR_MSK) :
                      (m_axil_araddr >= PF3_VF_PCIEBAR2AXIBAR)                                             ? (m_axil_araddr & PF3_VF_M_AXILITE_ADDR_MSK) : 32'hFFFFFFFF;
    
+   logic [31:0] computed_hash [0:NUM_FLOWS-1];
+   always_comb begin 
+      for (int i = 0 ; i < NUM_FLOWS ; i = i+1) begin 
+         computed_hash[i] = computeRSShash(
+            flow_config_reg[i].src_ip,
+            GLOBAL_DST_IP,
+            flow_config_reg[i].src_port,
+            GLOBAL_DST_PORT,
+            GLOBAL_PROTOCOL
+         );
+      end
+   end
    // Register Write
    //
    // To Control AXI-Stream pattern generator and checker
@@ -310,7 +334,7 @@ module user_control
          c2h_st_len <= 16'h80;  // default transfer size set to 128Bytes
          control_reg_h2c <= 32'h0;
          control_reg_c2h <= 32'h0;
-         cycles_per_pkt <= 32'h0;
+         // cycles_per_pkt <= 32'h0;
          wb_dat[255:0] <= 0;
          cmpt_size[31:0] <= 0;
          // perf_ctl <= 0;
@@ -330,17 +354,44 @@ module user_control
          traffic_pattern <= '0;
          for (int i = 0 ; i < 16 ; i= i+1) 
             rss_indir_table[i] <= 0;
+         for (int i = 0 ; i < NUM_FLOWS ; i = i+1) begin 
+            flow_config_reg[i].pkt_size <= 16'd128;
+            flow_config_reg[i].cycles_per_pkt <= 32'd100;
+            flow_config_reg[i].traffic_pattern <= 32'd0;
+            flow_config_reg[i].src_ip <= 32'd0;
+            flow_config_reg[i].src_port <= 16'd0;
+            flow_config_reg[i].src_mac <= 48'd0;
+            flow_config_reg[i].hash_val <= 32'd0;
+         end
       end
       else if (m_axil_wvalid && m_axil_wready ) begin
          if (wr_addr >= 32'hA8 && wr_addr <= 32'hE4) begin
             rss_indir_table[(wr_addr - 32'hA8) >> 2] <= m_axil_wdata; //(wr_addr - A4)/4 is the index, program the indirection table
-         end else begin
+         end else if (wr_addr >= 32'h210 && wr_addr < 32'h210 + NUM_FLOWS * 32'h20) begin
+            automatic int flow_idx = (wr_addr - 32'h210) >> 5; 
+            automatic int reg_offset = (wr_addr - 32'h210) & 5'h1F;
+
+            case (reg_offset) 
+               5'h00: flow_config_reg[flow_idx].pkt_size[15:0] <= m_axil_wdata[15:0];
+               5'h04: flow_config_reg[flow_idx].cycles_per_pkt[31:0] <= m_axil_wdata[31:0] - 1;
+               5'h08: flow_config_reg[flow_idx].traffic_pattern[31:0] <= m_axil_wdata[31:0];
+               5'h0C: flow_config_reg[flow_idx].src_ip[31:0] <= m_axil_wdata[31:0];
+               5'h10: flow_config_reg[flow_idx].src_port[15:0] <= m_axil_wdata[15:0];
+               5'h14: flow_config_reg[flow_idx].src_mac[31:0] <= m_axil_wdata;
+               5'h18: flow_config_reg[flow_idx].src_mac[47:32] <= m_axil_wdata[15:0];
+            endcase 
+            // flow_config_reg[flow_idx].hash_val <= computed_hash[flow_idx];
+         end 
+         else begin
+            for (int i = 0 ; i < NUM_FLOWS ; i = i+1) begin 
+               flow_config_reg[i].hash_val <= computed_hash[i];
+            end
             case (wr_addr)
                32'h00 : c2h_st_qid     <= m_axil_wdata[10:0]; //user-defined, base qid
                32'h04 : c2h_st_len     <= m_axil_wdata[15:0]; //user-defined
                32'h08 : control_reg_c2h<= m_axil_wdata[31:0]; //user-defined
                32'h0C : control_reg_h2c<= m_axil_wdata[31:0];
-               32'h1C : cycles_per_pkt<= m_axil_wdata[31:0]; //user-defined
+               // 32'h1C : cycles_per_pkt<= m_axil_wdata[31:0]; //user-defined
                32'h20 : traffic_pattern  <= m_axil_wdata[31:0];
                32'h24 : pfch_byp_tag_reg   <= m_axil_wdata[31:0];
                32'h28 : c2h_num_queue <= m_axil_wdata[10:0]; //user-defined, number of queues
@@ -364,6 +415,7 @@ module user_control
                32'h98 : usr_irq_msk[31:0] <= m_axil_wdata[31:0];
                32'h9C : usr_irq_num[31:0] <= m_axil_wdata[31:0];
                32'hA0 : gen_qdma_reset <= m_axil_wdata[0]; //Write 1 to reset, self clearing register
+               32'h200: flow_running_reg <= m_axil_wdata[NUM_FLOWS-1:0];
                // 32'h8E8: qdma_net_mac_lo[31:0] <= 32'h12345678;
                // 32'h8EC: qdma_net_mac_hi[31:0] <= 32'h00000011;
                // 32'h8F0: link_status_reg <= 32'h00000001;
@@ -478,7 +530,7 @@ module user_control
       32'h10 : m_axil_rdata  = (32'h0 | {h2c_qid[10:0], h2c_crc_match, 1'b0, h2c_zero_byte_reg, h2c_match});
       32'h14 : m_axil_rdata  = h2c_count;
       32'h18 : m_axil_rdata  = {32'h0 | c2h_status};
-      32'h1C : m_axil_rdata  = cycles_per_pkt[31:0];
+      // 32'h1C : m_axil_rdata  = cycles_per_pkt[31:0];
       32'h20 : m_axil_rdata  = traffic_pattern;
       32'h28 : m_axil_rdata = {32'h0 | c2h_num_queue};
       32'h30 : m_axil_rdata  = wb_dat[31:0];

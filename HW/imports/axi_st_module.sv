@@ -53,6 +53,7 @@
 // Version    : 5.0
 //-----------------------------------------------------------------------------
 `timescale 1ps / 1ps
+`include "types.svh"
 
 // From pciecoredefines.h
 `define XSRREG_SYNC(clk, reset_n, q,d,rstval)        \
@@ -74,12 +75,13 @@
 
 module axi_st_module
   #( 
-     parameter MAX_ETH_FRAME = 16'h1000,
-     parameter C_DATA_WIDTH = 256,
-     parameter CRC_WIDTH    = 32,
-     parameter C_H2C_TUSER_WIDTH = 128,
-     parameter TM_DSC_BITS = 16
-     )
+    parameter MAX_ETH_FRAME = 16'h1000,
+    parameter C_DATA_WIDTH = 256,
+    parameter CRC_WIDTH    = 32,
+    parameter C_H2C_TUSER_WIDTH = 128,
+    parameter TM_DSC_BITS = 16,
+    parameter NUM_FLOWS = 16
+  )
    (
     input axi_aresetn ,
     input axi_aclk,
@@ -102,7 +104,7 @@ module axi_st_module
     output                         m_axis_h2c_tready /* synthesis syn_keep = 1 */,
     input                          m_axis_h2c_tlast /* synthesis syn_keep = 1 */,
 
-    input [31:0]    cycles_per_pkt,
+    // input [31:0]    cycles_per_pkt,
     input [10:0]    c2h_num_queue,
 
     input         tm_dsc_sts_vld,
@@ -155,20 +157,34 @@ module axi_st_module
     input [31:0] read_addr,
     output [31:0] rd_output,
     input [31:0] cycles_per_pkt_2,
-    input [31:0] traffic_pattern
+    input [31:0] traffic_pattern,
+    input flow_config_t flow_config [0:NUM_FLOWS-1],
+    input logic [NUM_FLOWS-1:0] flow_running
     );
 
-   logic [CRC_WIDTH-1 : 0]     gen_h2c_tcrc;
-   logic 		       s_axis_c2h_tlast_nn1;
-   logic 		       wb_sm;
-   logic [31:0] 		       cmpt_count;
-   logic 		       c2h_st_d1;
-   logic 		       start_c2h;
-   logic 		       start_imm;
-   logic [31:0] 	       cmpt_pkt_cnt;
-   logic 		       cmpt_tvalid;
-   logic 		       start_cmpt;
-   logic rx_begin, qid_fifo_full;
+  logic [CRC_WIDTH-1 : 0]     gen_h2c_tcrc;
+  logic 		       s_axis_c2h_tlast_nn1;
+  logic 		       wb_sm;
+  logic [31:0] 		       cmpt_count;
+  logic 		       c2h_st_d1;
+  logic 		       start_c2h;
+  logic 		       start_imm;
+  logic [31:0] 	       cmpt_pkt_cnt;
+  logic 		       cmpt_tvalid;
+  logic 		       start_cmpt;
+  logic rx_begin, qid_fifo_full;
+  logic s_axis_c2h_tvalid_d1;
+  logic [15:0] curr_pkt_size;
+
+  always_ff @(posedge axi_aclk) begin
+    if (~axi_aresetn) begin
+      s_axis_c2h_tvalid_d1 <= 1'b0;
+    end
+    else begin
+      s_axis_c2h_tvalid_d1 <= s_axis_c2h_tvalid;
+    end
+  end
+  assign rx_begin = s_axis_c2h_tvalid & ~s_axis_c2h_tvalid_d1;
   //  logic [10:0]   c2h_qid;
 
 //   logic  m_axis_h2c_tready;
@@ -194,25 +210,24 @@ always @(posedge axi_aclk) begin
   end
 end
 
-reg [$clog2(C_DATA_WIDTH/8)-1:0]  s_axis_c2h_mty_reg;
-reg [15:0] s_axis_c2h_ctrl_len_reg;
+reg [$clog2(C_DATA_WIDTH/8)-1:0]  s_axis_c2h_mty_comb;
+reg [15:0] s_axis_c2h_ctrl_len_comb;
 
-always @(posedge axi_aclk) begin
-  s_axis_c2h_mty_reg <= (start_imm | c2h_control[5]) ? 6'h0 :
-                        (c2h_st_len%(C_DATA_WIDTH/8) > 0) ? C_DATA_WIDTH/8 - (c2h_st_len%(C_DATA_WIDTH/8)) :
-    6'b0;  //calculate empty bytes for c2h Streaming interface.
+// always @(posedge axi_aclk) begin
+assign s_axis_c2h_mty_comb = (start_imm | c2h_control[5]) ? 6'h0 :
+                        (curr_pkt_size%(C_DATA_WIDTH/8) > 0) ? C_DATA_WIDTH/8 - (curr_pkt_size%(C_DATA_WIDTH/8)) :
+                        6'b0;  //calculate empty bytes for c2h Streaming interface.
 
-  s_axis_c2h_ctrl_len_reg <= (start_imm | c2h_control[5]) ?  (16'h0 | C_DATA_WIDTH/8) : c2h_st_len; // in case of Immediate data, length = C_DATA_WIDTH/8
-end
+assign s_axis_c2h_ctrl_len_comb = (start_imm | c2h_control[5]) ?  (16'h0 | C_DATA_WIDTH/8) : curr_pkt_size; // in case of Immediate data, length = C_DATA_WIDTH/8
+// end
 
 assign s_axis_c2h_ctrl_marker = c2h_control[5];   // C2H Marker Enabled
 
 assign s_axis_c2h_ctrl_has_cmpt =  ~c2h_control[3];  // Disable completions
 
 //Integrate change:
-//assign s_axis_c2h_mty = s_axis_c2h_tlast ? s_axis_c2h_mty_reg : 6'h0;
-//assign s_axis_c2h_ctrl_len = s_axis_c2h_ctrl_len_reg;
-
+assign s_axis_c2h_mty = s_axis_c2h_tlast ? s_axis_c2h_mty_comb : 6'h0;
+assign s_axis_c2h_ctrl_len = s_axis_c2h_ctrl_len_comb;
 assign s_axis_c2h_ctrl_qid = c2h_dsc_bypass[1:0] == 2'b10 ? pfch_byp_tag_qid : c2h_qid;
 
 // C2H Stream data CRC Generator
@@ -230,7 +245,7 @@ crc32_gen #(
   .in_data          ( s_axis_c2h_tdata  ),
   .in_vld           ( (s_axis_c2h_tvalid & s_axis_c2h_tready) ),
   .in_tlast         ( s_axis_c2h_tlast  ),
-  .in_mty           ( s_axis_c2h_mty_reg    ),
+  .in_mty           ( s_axis_c2h_mty_comb    ),
   .out_crc          ( s_axis_c2h_tcrc   )
 );
 
@@ -262,7 +277,7 @@ logic        wr_conflict;
 // Extract queue ID from C2H control interface
 // For now, use s_axis_c2h_ctrl_qid output from TCP module
 // When packet completes (tlast), consume 1 credit for that queue
-assign consume_qid = s_axis_c2h_ctrl_qid;  // Queue ID from TCP module
+assign consume_qid = s_axis_c2h_ctrl_qid;  // Queue ID from RSS
 assign pkt_consume = s_axis_c2h_tvalid && s_axis_c2h_tready && s_axis_c2h_tlast;
 
 //------------------------------------------------------------------------------
@@ -333,110 +348,132 @@ end
 // TCP module provides its current queue ID via s_axis_c2h_ctrl_qid
 //------------------------------------------------------------------------------
 logic c2h_dsc_available;
-assign c2h_dsc_available = (credit_reg[consume_qid] > 32'sd0);
+assign c2h_dsc_available = (credit_reg[consume_qid[3:0]] > 32'sd0);
 
 //------------------------------------------------------------------------------
 // Always ready to accept descriptor status from QDMA (traffic_gen line 118)
 //------------------------------------------------------------------------------
 assign tm_dsc_sts_rdy = 1'b1;
 
+assign hash_val = 0;
+top_level tcp_stack(
+    .clk(axi_aclk),
+    .rst(axi_aresetn),
 
+    // H2C (QDMA -> TCP)
+    .m_axis_h2c_tdata(m_axis_h2c_tdata),
+    .m_axis_h2c_tcrc(m_axis_h2c_tcrc),
+    .m_axis_h2c_tuser_qid(m_axis_h2c_tuser_qid),
+    .m_axis_h2c_tuser_port_id(m_axis_h2c_tuser_port_id),
+    .m_axis_h2c_tuser_err(m_axis_h2c_tuser_err),
+    .m_axis_h2c_tuser_mdata(m_axis_h2c_tuser_mdata),
+    .m_axis_h2c_tuser_mty(m_axis_h2c_tuser_mty),
+    .m_axis_h2c_tuser_zero_byte(m_axis_h2c_tuser_zero_byte),
+    .m_axis_h2c_tvalid(m_axis_h2c_tvalid),
+    .m_axis_h2c_tlast(m_axis_h2c_tlast),
+    .m_axis_h2c_tready(m_axis_h2c_tready),
 
-top_level_simple tcp_stack (
-  .clk(axi_aclk),
-  .rst(~axi_aresetn),
-  .c2h_dsc_available(c2h_dsc_available),
-  .m_axis_h2c_tdata(m_axis_h2c_tdata),
-  .m_axis_h2c_tcrc(),
-  .m_axis_h2c_tuser_qid(m_axis_h2c_tuser_qid),
-  .m_axis_h2c_tuser_port_id(m_axis_h2c_tuser_port_id),
-  .m_axis_h2c_tuser_err(m_axis_h2c_tuser_err),
-  .m_axis_h2c_tuser_mdata(m_axis_h2c_tuser_mdata),
-  .m_axis_h2c_tuser_mty(m_axis_h2c_tuser_mty),
-  .m_axis_h2c_tuser_zero_byte(m_axis_h2c_tuser_zero_byte),
-  .m_axis_h2c_tvalid(m_axis_h2c_tvalid),
-  .m_axis_h2c_tlast(m_axis_h2c_tlast),
-  .m_axis_h2c_tready(m_axis_h2c_tready),
-
-  // C2H (TCP -> QDMA)
-  .s_axis_c2h_tdata(s_axis_c2h_tdata),
-  .s_axis_c2h_tcrc(),
-  .s_axis_c2h_ctrl_len(s_axis_c2h_ctrl_len),
-  .s_axis_c2h_ctrl_qid(),
-  .s_axis_c2h_ctrl_has_cmpt(),
-  .s_axis_c2h_ctrl_port_id(),
-
-  .s_axis_c2h_ctrl_marker(),
-  .s_axis_c2h_ctrl_ecc(),
-  .s_axis_c2h_mty(),
-
-  .s_axis_c2h_tvalid(s_axis_c2h_tvalid),
-  .s_axis_c2h_tlast(s_axis_c2h_tlast),
-  .s_axis_c2h_tready(s_axis_c2h_tready)
+    // C2H (TCP -> QDMA)
+    .s_axis_c2h_tdata(s_axis_c2h_tdata),
+    .s_axis_c2h_tcrc, //set in axi_st_module
+    .s_axis_c2h_ctrl_len(curr_pkt_size), //curr_pkt_size for tcp stack
+    .s_axis_c2h_ctrl_qid, //set in axi_st_module (c2h_qid), tcp should provide hash_value to RSS indirection table, compute based on 5-tuple, hash_val can be set to 0 temporarily(only using queue 0)
+    .s_axis_c2h_ctrl_has_cmpt, //set in axi_st_module
+    .s_axis_c2h_ctrl_port_id, //not needed
+    .s_axis_c2h_ctrl_marker, // set in axi_st_module
+    .s_axis_c2h_ctrl_ecc,  //not needed
+    .s_axis_c2h_mty, //set in axi_st_module, based on curr_pkt_size
+    .s_axis_c2h_tvalid(s_axis_c2h_tvalid),
+    .s_axis_c2h_tlast(s_axis_c2h_tlast), //need to implement in tcp stack
+    .s_axis_c2h_tready(s_axis_c2h_tready)
 );
-// traffic_gen #(.RX_LEN(C_DATA_WIDTH), .MAX_ETH_FRAME(MAX_ETH_FRAME), .TM_DSC_BITS(TM_DSC_BITS)) 
+
+// traffic_gen #(.RX_LEN(C_DATA_WIDTH), .MAX_ETH_FRAME(MAX_ETH_FRAME), .TM_DSC_BITS(TM_DSC_BITS), .NUM_FLOWS(NUM_FLOWS)) 
 // traffic_gen_c2h(
-//     .*,
 //     .axi_aclk(axi_aclk),
 //     .axi_aresetn(axi_aresetn),
-//     .control_reg(c2h_control),
-//     .txr_size(s_axis_c2h_ctrl_len),
+//     // .control_reg(c2h_control),
+//     // .txr_size(s_axis_c2h_ctrl_len),
 //     .timestamp(timestamp_counter),
 //     .rx_ready(s_axis_c2h_tready),
-//     .cycles_per_pkt(cycles_per_pkt),
-//     .cycles_per_pkt_2(cycles_per_pkt_2),
-//     .qid(c2h_st_qid),
-//     .num_queue(c2h_num_queue),
+//     // .cycles_per_pkt(cycles_per_pkt),
+//     // .cycles_per_pkt_2(cycles_per_pkt_2),
+//     // .qid(c2h_st_qid),
+//     // .num_queue(c2h_num_queue),
 //     .rx_valid(s_axis_c2h_tvalid),
 //     .rx_data(s_axis_c2h_tdata),
 //     .rx_last(s_axis_c2h_tlast),
 //     .hash_val(hash_val),
 //     .rx_qid(c2h_qid),
-//     .c2h_perform(c2h_perform),
-
-//     .tm_dsc_sts_vld    (tm_dsc_sts_vld   ),
-//     .tm_dsc_sts_qen    (tm_dsc_sts_qen   ),
-//     .tm_dsc_sts_byp    (tm_dsc_sts_byp   ),
-//     .tm_dsc_sts_dir    (tm_dsc_sts_dir   ),
-//     .tm_dsc_sts_mm     (tm_dsc_sts_mm    ),
-//     .tm_dsc_sts_error  (tm_dsc_sts_error ),
-//     .tm_dsc_sts_qid    (tm_dsc_sts_qid   ),
-//     .tm_dsc_sts_avl    (tm_dsc_sts_avl   ),
-//     .tm_dsc_sts_qinv   (tm_dsc_sts_qinv  ),
-//     .tm_dsc_sts_irq_arm(tm_dsc_sts_irq_arm),
-//     .tm_dsc_sts_rdy    (tm_dsc_sts_rdy)
+//     // .c2h_perform(c2h_perform),
+//     .qid_fifo_full(qid_fifo_full),
+//     .flow_config(flow_config),
+//     .flow_running(flow_running),
+//     .crdt_valid(c2h_dsc_available),
+//     .curr_flow_idx(curr_flow_idx)
+//     // .tm_dsc_sts_vld    (tm_dsc_sts_vld   ),
+//     // .tm_dsc_sts_qen    (tm_dsc_sts_qen   ),
+//     // .tm_dsc_sts_byp    (tm_dsc_sts_byp   ),
+//     // .tm_dsc_sts_dir    (tm_dsc_sts_dir   ),
+//     // .tm_dsc_sts_mm     (tm_dsc_sts_mm    ),
+//     // .tm_dsc_sts_error  (tm_dsc_sts_error ),
+//     // .tm_dsc_sts_qid    (tm_dsc_sts_qid   ),
+//     // .tm_dsc_sts_avl    (tm_dsc_sts_avl   ),
+//     // .tm_dsc_sts_qinv   (tm_dsc_sts_qinv  ),
+//     // .tm_dsc_sts_irq_arm(tm_dsc_sts_irq_arm),
+//     // .tm_dsc_sts_rdy    (tm_dsc_sts_rdy)
+// );
+// flow_gen #(
+//     .RX_LEN(C_DATA_WIDTH), 
+//     .NUM_FLOWS(NUM_FLOWS),
+//     .FIFO_DEPTH(64)
+// ) flow_gen_c2h (
+//     .axi_aclk(axi_aclk),
+//     .axi_aresetn(axi_aresetn),
+//     .timestamp(timestamp_counter),
+//     .rx_ready(s_axis_c2h_tready),
+//     .crdt_valid(c2h_dsc_available),
+//     .qid_fifo_full(qid_fifo_full),
+//     .flow_config(flow_config),
+//     .flow_running(flow_running),
+//     .rx_valid(s_axis_c2h_tvalid),
+//     .rx_data(s_axis_c2h_tdata),
+//     .rx_last(s_axis_c2h_tlast),
+//     .hash_val(hash_val),
+//     .pkt_size(curr_pkt_size)
 // );
 
-//   ST_h2c #(
-//   .BIT_WIDTH         ( C_DATA_WIDTH ),
-//   .C_H2C_TUSER_WIDTH ( C_H2C_TUSER_WIDTH )
-//   )
-//   ST_h2c_0 (
-//   .axi_aclk    (axi_aclk),
-//   .axi_aresetn (axi_aresetn),
-//   .perform_begin(perform_begin),
-//   .read_addr(read_addr),
-//   .rd_output(rd_output),
-//   .timestamp(timestamp_counter),
-//   .h2c_tdata   (m_axis_h2c_tdata),
-//   .h2c_tvalid  (m_axis_h2c_tvalid),
-//   .h2c_tready  (m_axis_h2c_tready),
-//   .h2c_tlast   (m_axis_h2c_tlast),
-//   .h2c_tuser_qid (m_axis_h2c_tuser_qid),
-//   .h2c_tuser_port_id (m_axis_h2c_tuser_port_id),
-//   .h2c_tuser_err (m_axis_h2c_tuser_err),
-//   .h2c_tuser_mdata (m_axis_h2c_tuser_mdata),
-//   .h2c_tuser_mty (m_axis_h2c_tuser_mty),
-//   .h2c_tuser_zero_byte (m_axis_h2c_tuser_zero_byte),
-//   .h2c_count   (h2c_count),
-//   .h2c_match   (h2c_match),
-//   .clr_match   (clr_h2c_match)
-//   );
 
-   reg [C_DATA_WIDTH-1 :0]    m_axis_h2c_tdata_reg;
-   reg 			      m_axis_h2c_tvalid_reg;
-   reg 			      m_axis_h2c_tlast_reg;
-   reg [CRC_WIDTH-1 : 0]      m_axis_h2c_tcrc_reg;
+ST_h2c #(
+.BIT_WIDTH         ( C_DATA_WIDTH ),
+.C_H2C_TUSER_WIDTH ( C_H2C_TUSER_WIDTH )
+)
+ST_h2c_0 (
+.axi_aclk    (axi_aclk),
+.axi_aresetn (axi_aresetn),
+.perform_begin(perform_begin),
+.read_addr(read_addr),
+.rd_output(rd_output),
+.timestamp(timestamp_counter),
+.h2c_tdata   (m_axis_h2c_tdata),
+.h2c_tvalid  (m_axis_h2c_tvalid),
+.h2c_tready  (m_axis_h2c_tready),
+.h2c_tlast   (m_axis_h2c_tlast),
+.h2c_tuser_qid (m_axis_h2c_tuser_qid),
+.h2c_tuser_port_id (m_axis_h2c_tuser_port_id),
+.h2c_tuser_err (m_axis_h2c_tuser_err),
+.h2c_tuser_mdata (m_axis_h2c_tuser_mdata),
+.h2c_tuser_mty (m_axis_h2c_tuser_mty),
+.h2c_tuser_zero_byte (m_axis_h2c_tuser_zero_byte),
+.h2c_count   (h2c_count),
+.h2c_match   (h2c_match),
+.clr_match   (clr_h2c_match)
+);
+
+  reg [C_DATA_WIDTH-1 :0]    m_axis_h2c_tdata_reg;
+  reg 			      m_axis_h2c_tvalid_reg;
+  reg 			      m_axis_h2c_tlast_reg;
+  reg [CRC_WIDTH-1 : 0]      m_axis_h2c_tcrc_reg;
 (* max_fanout = 100 *)    reg [$clog2(C_DATA_WIDTH/8)-1 : 0]                m_axis_h2c_tuser_mty_reg;
    
    always @(posedge axi_aclk ) begin
@@ -493,6 +530,7 @@ end
 wire empty;
 logic rd_en, wr_en;
 wire [10:0] rd_out_qid;
+logic [15:0] rd_out_pkt_size;
 assign cmpt_tvalid = ~empty;
 
 logic [15 : 0] cmp_par_val;  // fixed 512/32
@@ -520,13 +558,13 @@ xpm_fifo_sync #
   .FIFO_MEMORY_TYPE     ("block"), //string; "auto", "block", "distributed", or "ultra";
   .ECC_MODE             ("no_ecc"), //string; "no_ecc" or "en_ecc";
   .FIFO_WRITE_DEPTH     (512), //positive integer
-  .WRITE_DATA_WIDTH     (11), //positive integer
+  .WRITE_DATA_WIDTH     (27), //positive integer
   .WR_DATA_COUNT_WIDTH  (10), //positive integer
   .PROG_FULL_THRESH     (10), //positive integer
   .FULL_RESET_VALUE     (0), //positive integer; 0 or 1
   .READ_MODE            ("fwft"), //string; "std" or "fwft";
   .FIFO_READ_LATENCY    (1), //positive integer;
-  .READ_DATA_WIDTH      (11), //positive integer
+  .READ_DATA_WIDTH      (27), //positive integer
   .RD_DATA_COUNT_WIDTH  (10), //positive integer
   .PROG_EMPTY_THRESH    (10), //positive integer
   .DOUT_RESET_VALUE     ("0"), //string
@@ -536,14 +574,14 @@ xpm_fifo_sync #
 .rst             (~axi_aresetn),
 .wr_clk          (axi_aclk),
 .wr_en           (wr_en),
-.din             (c2h_qid),
+.din             ({curr_pkt_size, c2h_qid}),
 .full            (qid_fifo_full),
 .prog_full       (),
 .wr_data_count   (),
 .overflow        (),
 .wr_rst_busy     (),
 .rd_en           (rd_en),
-.dout            (rd_out_qid),
+.dout            ({rd_out_pkt_size, rd_out_qid}),
 .empty           (empty),
 .prog_empty      (),
 .rd_data_count   (),
@@ -564,7 +602,7 @@ xpm_fifo_sync #
   // this format should be same for two cycle if type is [1] is set.
 assign s_axis_c2h_cmpt_tdata =  byp_to_cmp ? {byp_data_to_cmp[511:4], 4'b0000} :
         start_imm ? {wb_dat[255:0],wb_dat[255:4], 4'b0000} :          // dsc used is not set
-          {wb_dat[255:0], wb_dat[255:20], c2h_st_len[15:0], 4'b1000};   // dsc used is set 
+          {wb_dat[255:0], wb_dat[255:20], rd_out_pkt_size, 4'b1000};   // dsc used is set 
 
 assign s_axis_c2h_cmpt_tvalid = start_imm | cmpt_tvalid;
 

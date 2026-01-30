@@ -20,12 +20,7 @@
 //////////////////////////////////////////////////////////////////////////////////
 
 import packages::*;
-module tcp_fsm #(
-    parameter SRC_MAC   = 48'hFF_FF_FF_FF_FF_FF,
-    parameter SRC_IP    = 32'hFF_FF_FF_FF,
-    parameter DEST_MAC  = 48'hFF_FF_FF_FF_FF_FF,
-    parameter DEST_IP   = 32'hFF_FF_FF_FF
-) (
+module tcp_fsm (
     input logic         rx_valid,
 
     input tcp_state_t   tcp_curr_t,
@@ -95,13 +90,13 @@ always_comb begin
                 end
             end
             SYN_SENT: begin
-                if (tcp_csr_rx == CSR_SYN_ACK) begin
+                if (tcp_csr_rx.syn && tcp_csr_rx.ack) begin
                     tcp_csr_tx = CSR_ACK;
                 end
-                else if (tcp_csr_rx == CSR_SYN) begin
+                else if (tcp_csr_rx.syn) begin
                     tcp_csr_tx = CSR_SYN_ACK;
                 end
-                else if (tcp_csr_rx == CSR_RST) begin
+                else if (tcp_csr_rx.rst) begin
                     // HOST RESETS (INVALIDATE CACHE AND TCB)
                     invalidate = 1'b1;
                 end
@@ -110,17 +105,17 @@ always_comb begin
                     invalidate = 1'b1;
                 end
             end
-            ESTABLISHED: begin
-                if (tcp_csr_rx == CSR_FIN) begin
-                    tcp_csr_tx = CSR_ACK;
+        ESTABLISHED: begin
+            if (tcp_csr_rx.fin) begin
+                tcp_csr_tx = CSR_FIN_ACK;
+            end
+            else if (tcp_csr_rx.syn) begin
+                tcp_csr_tx = CSR_RST;
+                invalidate = 1'b1;
+            end
+                else if (tcp_csr_rx.ack) begin
                 end
-                else if (tcp_csr_rx == CSR_SYN) begin
-                    tcp_csr_tx = CSR_RST;
-                    invalidate = 1'b1;
-                end
-                else if (tcp_csr_rx == CSR_ACK) begin
-                end
-                else if (tcp_csr_rx == CSR_RST) begin
+                else if (tcp_csr_rx.rst) begin
                     // HOST RESETS (INVALIDATE CACHE AND TCB)
                     invalidate = 1'b1;
                 end
@@ -129,14 +124,14 @@ always_comb begin
                     invalidate = 1'b1;
                 end
             end
-            FIN_1: begin
-                if (tcp_csr_rx == CSR_FIN) begin
-                    tcp_csr_tx = CSR_ACK;
-                end
-                else if (tcp_csr_rx == CSR_ACK) begin
-                end
-                else if (tcp_csr_rx == CSR_RST) begin
-                    // HOST RESETS (INVALIDATE CACHE AND TCB)
+        FIN_1: begin
+            if (tcp_csr_rx.fin) begin
+                tcp_csr_tx = CSR_FIN_ACK;
+            end
+            else if (tcp_csr_rx.ack) begin
+            end
+            else if (tcp_csr_rx.rst) begin
+                // HOST RESETS (INVALIDATE CACHE AND TCB)
                     invalidate = 1'b1;
                 end
                 else begin
@@ -144,14 +139,14 @@ always_comb begin
                     invalidate = 1'b1;
                 end
             end
-            FIN_2: begin
-                if (tcp_csr_rx == CSR_FIN) begin
-                    tcp_csr_tx = CSR_ACK;
-                end
-                else if (tcp_csr_rx == CSR_ACK) begin
-                end
-                else if (tcp_csr_rx == CSR_RST) begin
-                    // HOST RESETS (INVALIDATE CACHE AND TCB)
+        FIN_2: begin
+            if (tcp_csr_rx.fin) begin
+                tcp_csr_tx = CSR_FIN_ACK;
+            end
+            else if (tcp_csr_rx.ack) begin
+            end
+            else if (tcp_csr_rx.rst) begin
+                // HOST RESETS (INVALIDATE CACHE AND TCB)
                     invalidate = 1'b1;
                 end
                 else begin
@@ -159,14 +154,14 @@ always_comb begin
                     invalidate = 1'b1;
                 end
             end
-            CLOSING: begin
-                if (tcp_csr_rx == CSR_FIN) begin
-                    tcp_csr_tx = CSR_ACK;
-                end
-                else if (tcp_csr_rx == CSR_ACK) begin
-                end
-                else if (tcp_csr_rx == CSR_RST) begin
-                    // HOST RESETS (INVALIDATE CACHE AND TCB)
+        CLOSING: begin
+            if (tcp_csr_rx.fin) begin
+                tcp_csr_tx = CSR_FIN_ACK;
+            end
+            else if (tcp_csr_rx.ack) begin
+            end
+            else if (tcp_csr_rx.rst) begin
+                // HOST RESETS (INVALIDATE CACHE AND TCB)
                     invalidate = 1'b1;
                 end
                 else begin
@@ -174,14 +169,14 @@ always_comb begin
                     invalidate = 1'b1;
                 end
             end
-            CLOSE_WAIT: begin
-                if (tcp_csr_rx == CSR_FIN) begin
-                    tcp_csr_tx = CSR_ACK;
-                end
-                else if (tcp_csr_rx == CSR_ACK) begin
-                end
-                else if (tcp_csr_rx == CSR_RST) begin
-                    // HOST RESETS (INVALIDATE CACHE AND TCB)
+        CLOSE_WAIT: begin
+            if (tcp_csr_rx.fin) begin
+                tcp_csr_tx = CSR_FIN_ACK;
+            end
+            else if (tcp_csr_rx.ack) begin
+            end
+            else if (tcp_csr_rx.rst) begin
+                // HOST RESETS (INVALIDATE CACHE AND TCB)
                     invalidate = 1'b1;
                 end
                 else begin
@@ -189,33 +184,33 @@ always_comb begin
                     invalidate = 1'b1;
                 end
             end
-            LAST_ACK: begin
-                if (tcp_csr_rx == CSR_FIN) begin
-                    tcp_csr_tx = CSR_ACK;
-                end
-                else if (tcp_csr_rx == CSR_ACK) begin
-                end
-                else if (tcp_csr_rx == CSR_RST) begin
-                    // HOST RESETS (INVALIDATE CACHE AND TCB)
-                    invalidate = 1'b1;
-                end
-                else begin
-                    tcp_csr_tx = CSR_RST;
-                    invalidate = 1'b1;
-                end
+        LAST_ACK: begin
+            if (tcp_csr_rx.fin) begin
+                tcp_csr_tx = CSR_FIN_ACK;
             end
-            TIME_WAIT: begin
-                if (tcp_csr_rx == CSR_FIN) begin
-                    tcp_csr_tx = CSR_ACK;
-                end
-                else if (tcp_csr_rx == CSR_ACK) begin
-                end
-                else if (tcp_csr_rx == CSR_RST) begin
-                    // HOST RESETS (INVALIDATE CACHE AND TCB)
-                    invalidate = 1'b1;
-                end
-                else begin
-                    tcp_csr_tx = CSR_RST;
+            else if (tcp_csr_rx.ack) begin
+            end
+            else if (tcp_csr_rx.rst) begin
+                // HOST RESETS (INVALIDATE CACHE AND TCB)
+                invalidate = 1'b1;
+            end
+            else begin
+                tcp_csr_tx = CSR_RST;
+                invalidate = 1'b1;
+            end
+        end
+        TIME_WAIT: begin
+            if (tcp_csr_rx.fin) begin
+                tcp_csr_tx = CSR_FIN_ACK;
+            end
+            else if (tcp_csr_rx.ack) begin
+            end
+            else if (tcp_csr_rx.rst) begin
+                // HOST RESETS (INVALIDATE CACHE AND TCB)
+                invalidate = 1'b1;
+            end
+            else begin
+                tcp_csr_tx = CSR_RST;
                     invalidate = 1'b1;
                 end
             end
@@ -237,7 +232,7 @@ always_comb begin
             tcp_next_t = LISTEN;
         end
         LISTEN : begin
-            if (rx_valid && (tcp_csr_rx == CSR_SYN)) begin
+            if (rx_valid && tcp_csr_rx.syn) begin
                 tcp_next_t = SYN_RECV;
             end
             else begin
@@ -245,69 +240,69 @@ always_comb begin
             end
         end
         SYN_RECV : begin
-            if (rx_valid && (tcp_csr_rx == CSR_ACK)) begin
+            if (rx_valid && tcp_csr_rx.ack) begin
                 tcp_next_t = ESTABLISHED;
             end
-            else if (rx_valid && tcp_csr_rx == CSR_RST) begin
+            else if (rx_valid && tcp_csr_rx.rst) begin
                 tcp_next_t = CLOSED;
             end
         end
         SYN_SENT : begin
-            if (rx_valid && tcp_csr_rx == CSR_RST) begin
+            if (rx_valid && tcp_csr_rx.rst) begin
                 tcp_next_t = CLOSED;
             end
-            else if (rx_valid && (tcp_csr_rx == CSR_SYN_ACK)) begin
+            else if (rx_valid && (tcp_csr_rx.syn && tcp_csr_rx.ack)) begin
                 tcp_next_t = ESTABLISHED;
             end
-            else if (rx_valid && (tcp_csr_rx == CSR_SYN)) begin
+            else if (rx_valid && tcp_csr_rx.syn) begin
                 tcp_next_t = SYN_RECV;
             end
         end
         ESTABLISHED : begin
-            if (rx_valid && tcp_csr_rx == CSR_RST) begin
+            if (rx_valid && tcp_csr_rx.rst) begin
                 tcp_next_t = CLOSED;
             end
-            else if (rx_valid && tcp_csr_rx == CSR_FIN) begin
-                tcp_next_t = CLOSE_WAIT;
+            else if (rx_valid && tcp_csr_rx.fin) begin
+                tcp_next_t = TIME_WAIT;
             end
         end
         FIN_1 : begin
-            if (rx_valid && tcp_csr_rx == CSR_RST) begin
+            if (rx_valid && tcp_csr_rx.rst) begin
                 tcp_next_t = CLOSED;
             end
-            else if (rx_valid && tcp_csr_rx == CSR_FIN) begin
-                tcp_next_t = CLOSING;
+            else if (rx_valid && tcp_csr_rx.fin) begin
+                tcp_next_t = TIME_WAIT;
             end
-            else if (rx_valid && (tcp_csr_rx == CSR_ACK)) begin
+            else if (rx_valid && tcp_csr_rx.ack) begin
                 tcp_next_t = FIN_2;
             end
         end
         FIN_2 : begin
-            if (rx_valid && tcp_csr_rx == CSR_RST) begin
+            if (rx_valid && tcp_csr_rx.rst) begin
                 tcp_next_t = CLOSED;
             end
-            else if (rx_valid && tcp_csr_rx == CSR_FIN) begin
+            else if (rx_valid && tcp_csr_rx.fin) begin
                 tcp_next_t = TIME_WAIT;
             end
         end
         CLOSING : begin
-            if (rx_valid && tcp_csr_rx == CSR_RST) begin
+            if (rx_valid && tcp_csr_rx.rst) begin
                 tcp_next_t = CLOSED;
             end
-            else if (rx_valid && (tcp_csr_rx == CSR_ACK)) begin
+            else if (rx_valid && tcp_csr_rx.ack) begin
                 tcp_next_t = TIME_WAIT;
             end
         end
         CLOSE_WAIT : begin
-            if (rx_valid && tcp_csr_rx == CSR_RST) begin
+            if (rx_valid && tcp_csr_rx.rst) begin
                 tcp_next_t = CLOSED;
             end
         end
         LAST_ACK : begin
-            if (rx_valid && tcp_csr_rx == CSR_RST) begin
+            if (rx_valid && tcp_csr_rx.rst) begin
                 tcp_next_t = CLOSED;
             end
-            else if (rx_valid && (tcp_csr_rx == CSR_ACK)) begin
+            else if (rx_valid && tcp_csr_rx.ack) begin
                 tcp_next_t = CLOSED;
             end
         end

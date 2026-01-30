@@ -91,7 +91,7 @@ localparam PAT_INC = (PATT_WIDTH == 16) ? ((BIT_WIDTH == 64 ) ? 4 : (BIT_WIDTH =
                                              :((BIT_WIDTH == 64 ) ? 8 : (BIT_WIDTH == 128 ) ? 16 : (BIT_WIDTH == 256 ) ? 32 : 64); // Total bytes per beat
 localparam TCQ = 1;
    
-reg [31:0] dat[0:511]; //64 * 1024
+reg [31:0] dat[0:511]; 
 reg [8:0] idx;
 wire tkeep_all1;
 wire tkeep_half1;
