@@ -164,10 +164,27 @@ int main(int argc, char* argv[]) {
     uint64_t interval_cycles = interval * hz;
 
     max_completion_size = pktsize; //datasize + headersize
+    /* FLOW CONFIG Setting */
     PciWrite(user_bar_idx, C2H_TRAFFIC_PATTERN_REG, 0, port);
-    PciWrite(user_bar_idx, C2H_ST_LEN_REG, max_completion_size, port);
-    PciWrite(user_bar_idx, CYCLES_PER_PKT, cycles, port);
-    PciWrite(user_bar_idx, C2H_NUM_QUEUES, num_queues, port);
+    // PciWrite(user_bar_idx, C2H_ST_LEN_REG, max_completion_size, port);
+    // PciWrite(user_bar_idx, CYCLES_PER_PKT, cycles, port);
+    // PciWrite(user_bar_idx, C2H_NUM_QUEUES, num_queues, port);
+    //Flow0
+    PciWrite(user_bar_idx, FLOW0_CONFIG_BASE, 64, port); //Flow0 packet size
+    PciWrite(user_bar_idx, FLOW0_CONFIG_BASE+4, 10, port); //Flow0 cycles per pkt
+    PciWrite(user_bar_idx, FLOW0_CONFIG_BASE+8, 0, port); //Flow0 traffic pattern, not used by now
+    PciWrite(user_bar_idx, FLOW0_CONFIG_BASE+12, 0x0A000001, port); //Flow0 src ip address:10.0.0.1
+    PciWrite(user_bar_idx, FLOW0_CONFIG_BASE+16, 1000, port); //Flow0 src port:1000
+    PciWrite(user_bar_idx, FLOW0_CONFIG_BASE+20, 0x0AABBCCDD, port); //Flow0 src mac low address:AA:BB:CC:DD
+    PciWrite(user_bar_idx, FLOW0_CONFIG_BASE+24, 0x0011, port); //Flow0 src mac high address:00:11
+    //Flow1
+    PciWrite(user_bar_idx, FLOW1_CONFIG_BASE, 128, port); //Flow1 packet size
+    PciWrite(user_bar_idx, FLOW1_CONFIG_BASE+4, 20, port); //Flow1 cycles per pkt
+    PciWrite(user_bar_idx, FLOW1_CONFIG_BASE+8, 0, port); //Flow1 traffic pattern, not used by now
+    PciWrite(user_bar_idx, FLOW1_CONFIG_BASE+12, 0x0A000002, port); //Flow1 src ip address:10.0.0.2
+    PciWrite(user_bar_idx, FLOW1_CONFIG_BASE+16, 1001, port); //Flow1 src port:1001
+    PciWrite(user_bar_idx, FLOW1_CONFIG_BASE+20, 0xAABBCCDE, port); //Flow1 src mac low address:AA:BB:CC:DE
+    PciWrite(user_bar_idx, FLOW1_CONFIG_BASE+24, 0x0011, port); //Flow1 src mac high address:00:11
 
     reg_val = PciRead(user_bar_idx, CYCLES_PER_PKT, port);
     printf("max_completion_size: %d, cycles: %d\n", max_completion_size, reg_val);
@@ -186,10 +203,11 @@ int main(int argc, char* argv[]) {
     rte_eal_mp_remote_launch((lcore_function_t*)&recv_pkt_single_core, temp, SKIP_MAIN);
     sleep(1);
     /* Start the C2H Engine */
-    PciWrite(user_bar_idx, C2H_ST_QID_REG, qbase, port);
-    reg_val = PciRead(user_bar_idx, C2H_CONTROL_REG, port);
-    reg_val |= ST_C2H_START_VAL;
-    PciWrite(user_bar_idx, C2H_CONTROL_REG, reg_val, port);
+    // PciWrite(user_bar_idx, C2H_ST_QID_REG, qbase, port);
+    // reg_val = PciRead(user_bar_idx, C2H_CONTROL_REG, port);
+    // reg_val |= ST_C2H_START_VAL;
+    // PciWrite(user_bar_idx, C2H_CONTROL_REG, reg_val, port);
+    PciWrite(user_bar_idx, FLOW_RUNNING_VEC, 0x3, port); //Flow0 and Flow1 running
 
     prev_tsc = rte_rdtsc_precise();
     test_tsc = prev_tsc;
@@ -223,24 +241,25 @@ int main(int argc, char* argv[]) {
     }
 
     /* Stop the C2H Engine */
-    reg_val = PciRead(user_bar_idx, C2H_CONTROL_REG, port); 
-    reg_val |= ST_C2H_END_VAL;
-    PciWrite(user_bar_idx, C2H_CONTROL_REG, reg_val,port);
+    // reg_val = PciRead(user_bar_idx, C2H_CONTROL_REG, port); 
+    // reg_val |= ST_C2H_END_VAL;
+    // PciWrite(user_bar_idx, C2H_CONTROL_REG, reg_val,port);
+    PciWrite(user_bar_idx, FLOW_RUNNING_VEC, 0x0, port); //Flow0 and Flow1 stopped
 
     printf("DMA received number of packets: %ld\n",number_pkts_prev);
     //rte_spinlock_unlock(&pinfo[port].port_update_lock);
 
     /*Write the recorded throughput to the target file*/
-    char filename[100];
-    sprintf(filename, "./result/result_%d_rx_only.txt", num_queues);
-    FILE* file = fopen(filename, "a");
-    double average = 0.0;
-    for (i = 0 ; i < 10 ; i++) {
-        average += arr[i];
-    }
-    average = average/(1.0*10);
-    fprintf(file, "%lf\n", average);
-    fclose(file);
+    // char filename[100];
+    // sprintf(filename, "./result/result_%d_rx_only.txt", num_queues);
+    // FILE* file = fopen(filename, "a");
+    // double average = 0.0;
+    // for (i = 0 ; i < 10 ; i++) {
+    //     average += arr[i];
+    // }
+    // average = average/(1.0*10);
+    // fprintf(file, "%lf\n", average);
+    // fclose(file);
 
     /*Terminate the device*/
     rte_eth_dev_stop(port);
