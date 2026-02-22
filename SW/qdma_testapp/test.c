@@ -8,7 +8,7 @@
 int port = 0;
 int num_queues = 1;
 int stqueues = 1;
-int pktsize = 1024;
+int pktsize = 128;
 int numpkts = 0;
 int cycles = 0;
 int interval = 10;
@@ -170,7 +170,7 @@ int main(int argc, char* argv[]) {
     // PciWrite(user_bar_idx, CYCLES_PER_PKT, cycles, port);
     // PciWrite(user_bar_idx, C2H_NUM_QUEUES, num_queues, port);
     //Flow0
-    PciWrite(user_bar_idx, FLOW0_CONFIG_BASE, 64, port); //Flow0 packet size
+    PciWrite(user_bar_idx, FLOW0_CONFIG_BASE, 128, port); //Flow0 packet size
     PciWrite(user_bar_idx, FLOW0_CONFIG_BASE+4, 10, port); //Flow0 cycles per pkt
     PciWrite(user_bar_idx, FLOW0_CONFIG_BASE+8, 0, port); //Flow0 traffic pattern, not used by now
     PciWrite(user_bar_idx, FLOW0_CONFIG_BASE+12, 0x0A000001, port); //Flow0 src ip address:10.0.0.1

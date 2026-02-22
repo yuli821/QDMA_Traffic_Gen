@@ -10,7 +10,7 @@
 int main(int argc, char *argv[]) {
     int sock;
     struct sockaddr_in addr;
-    const char *ifname = "enp153s0";  // Change to your interface name
+    const char *ifname = "enp161s0";  // Change to your interface name
     const char *fpga_ip = "192.168.100.11";  // FPGA's IP address
     
     // Allow interface name and FPGA IP as arguments
