@@ -572,6 +572,13 @@ static int qdma_net_setup_rx_resources(struct qdma_net_priv *priv,
 		rxq->c2h_qhndl = qdata->qhndl;
 	}
 
+	rv = qdma_queue_config(priv->xpdev->dev_hndl, rxq->c2h_qhndl, &qconf, err_buf, sizeof(err_buf));
+	if (rv < 0) {
+		netdev_err(priv->ndev, "Failed to config C2H queue: %d, err: %s\n", rv, err_buf);
+		xpdev_queue_delete(priv->xpdev, qconf.qidx, Q_C2H, err_buf, sizeof(err_buf));
+		return rv;
+	}
+
 	rv = qdma_queue_start(priv->xpdev->dev_hndl, rxq->c2h_qhndl, err_buf, sizeof(err_buf));
 	if (rv < 0) {
 		netdev_err(priv->ndev, "Failed to start C2H queue: %d\n", rv);
@@ -740,6 +747,9 @@ static int qdma_net_napi_poll(struct napi_struct *napi, int budget)
 	work_done = qdma_queue_service(priv->xpdev->dev_hndl,
 	                                q->c2h_qhndl, budget, true);
 
+	if (work_done < 0) {
+    	work_done = 0;
+	}
 	if (work_done < budget) {
 		napi_complete_done(napi, work_done);
 		/* Re-enable interrupts if needed */
