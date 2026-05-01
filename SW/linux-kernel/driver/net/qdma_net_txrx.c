@@ -196,8 +196,8 @@ int qdma_net_tx_enqueue_skb(struct qdma_net_priv *priv,
 	//rv = qdma_queue_packet_write(priv->xpdev->dev_hndl, q->h2c_qhndl, &tx_ctx->req);
 	rv = qdma_request_submit(priv->xpdev->dev_hndl, q->h2c_qhndl, &tx_ctx->req);
 	
-	pr_info("qdma_net: TX qdma_queue_packet_write returned %d (expected: %u)\n",
-		rv, tx_ctx->req.count);
+	pr_info("qdma_net: TX qdma_request_submit returned %d\n",
+		rv);
 
 	if (rv < 0) {
 		pr_err("qdma_net: qdma_queue_packet_write failed: %d\n", rv);
