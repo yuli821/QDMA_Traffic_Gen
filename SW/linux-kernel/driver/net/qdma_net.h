@@ -71,6 +71,8 @@ struct qdma_net_queue {
 	struct qdma_net_priv *priv;
 
 	struct qdma_net_mempool tx_ctx_pool;
+    /* Per-poll RX work counter*/
+	unsigned int rx_work_done;
 };
 
 /**

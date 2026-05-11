@@ -741,15 +741,34 @@ static int qdma_net_napi_poll(struct napi_struct *napi, int budget)
 {
 	struct qdma_net_queue *q = container_of(napi, struct qdma_net_queue, napi);
 	struct qdma_net_priv *priv = q->priv;
+	int rv;
 	int work_done;
-
+	q->rx_work_done = 0;
 	/* Service RX completions from QDMA */
-	work_done = qdma_queue_service(priv->xpdev->dev_hndl,
+	rv = qdma_queue_service(priv->xpdev->dev_hndl,
 	                                q->c2h_qhndl, budget, true);
+	switch (rv) {
+    case 0:
+    case -ENODATA:
+        break;
+    case -EINVAL:
+        if (net_ratelimit())
+            netdev_err(priv->ndev,
+                       "qdma_queue_service returned -EINVAL on q%u\n",
+                       q->qid);
+        break;
+    default:
+        if (net_ratelimit())
+            netdev_warn(priv->ndev,
+                        "qdma_queue_service returned %d on q%u\n",
+                        rv, q->qid);
+        break;
+    }
 
-	if (work_done < 0) {
-    	work_done = 0;
-	}
+	work_done = q->rx_work_done;
+
+	(void)qdma_queue_update_pointers(priv->xpdev->dev_hndl, q->c2h_qhndl);
+	
 	if (work_done < budget) {
 		napi_complete_done(napi, work_done);
 		/* Re-enable interrupts if needed */

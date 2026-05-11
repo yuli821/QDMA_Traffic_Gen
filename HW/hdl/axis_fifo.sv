@@ -30,12 +30,19 @@ logic [ADDR_WIDTH-1:0] wr_ptr, rd_ptr;
 // Registered status flags (NO combinational comparison in critical path)
 logic full_reg, empty_reg;
 
+logic tlast_rd_d1;
+
+always_ff @(posedge clk) begin 
+    if (~rst_n) tlast_rd_d1 <= 1'b0;
+    else tlast_rd_d1 <= m_axis_tlast && read_en;
+end
+
 // Handshake signals
 wire write_en = s_axis_tvalid && ~full_reg;
-wire read_en = ~empty_reg && m_axis_tready;
+wire read_en = ~empty_reg && m_axis_tready && ~tlast_rd_d1;
 
 assign s_axis_tready = ~full_reg;
-assign m_axis_tvalid = ~empty_reg;
+assign m_axis_tvalid = ~empty_reg && ~tlast_rd_d1;
 assign m_axis_tdata = data_mem[rd_ptr];
 assign m_axis_tlast = tlast_mem[rd_ptr];
 
