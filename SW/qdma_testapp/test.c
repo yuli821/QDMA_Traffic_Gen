@@ -170,8 +170,8 @@ int main(int argc, char* argv[]) {
     // PciWrite(user_bar_idx, CYCLES_PER_PKT, cycles, port);
     // PciWrite(user_bar_idx, C2H_NUM_QUEUES, num_queues, port);
     //Flow0
-    PciWrite(user_bar_idx, FLOW0_CONFIG_BASE, 128, port); //Flow0 packet size
-    PciWrite(user_bar_idx, FLOW0_CONFIG_BASE+4, 10, port); //Flow0 cycles per pkt
+    PciWrite(user_bar_idx, FLOW0_CONFIG_BASE, 512, port); //Flow0 packet size
+    PciWrite(user_bar_idx, FLOW0_CONFIG_BASE+4, 8, port); //Flow0 cycles per pkt
     PciWrite(user_bar_idx, FLOW0_CONFIG_BASE+8, 0, port); //Flow0 traffic pattern, not used by now
     PciWrite(user_bar_idx, FLOW0_CONFIG_BASE+12, 0x0A000001, port); //Flow0 src ip address:10.0.0.1
     PciWrite(user_bar_idx, FLOW0_CONFIG_BASE+16, 1000, port); //Flow0 src port:1000
@@ -179,7 +179,7 @@ int main(int argc, char* argv[]) {
     PciWrite(user_bar_idx, FLOW0_CONFIG_BASE+24, 0x0011, port); //Flow0 src mac high address:00:11
     //Flow1
     PciWrite(user_bar_idx, FLOW1_CONFIG_BASE, 128, port); //Flow1 packet size
-    PciWrite(user_bar_idx, FLOW1_CONFIG_BASE+4, 20, port); //Flow1 cycles per pkt
+    PciWrite(user_bar_idx, FLOW1_CONFIG_BASE+4, 2, port); //Flow1 cycles per pkt
     PciWrite(user_bar_idx, FLOW1_CONFIG_BASE+8, 0, port); //Flow1 traffic pattern, not used by now
     PciWrite(user_bar_idx, FLOW1_CONFIG_BASE+12, 0x0A000002, port); //Flow1 src ip address:10.0.0.2
     PciWrite(user_bar_idx, FLOW1_CONFIG_BASE+16, 1001, port); //Flow1 src port:1001

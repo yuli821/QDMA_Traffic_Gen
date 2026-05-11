@@ -1037,6 +1037,7 @@ int descq_process_completion_st_c2h(struct qdma_descq *descq, int budget,
 
 	dma_rmb();
 	pend = ring_idx_delta(pidx_cmpt, cidx_cmpt, rngsz_cmpt);
+	pr_info_ratelimited("qdma: C2H cmpt check q=%s pidx_cmpt=%u cidx_cmpt=%u pend=%d\n", descq->conf.name, pidx_cmpt, cidx_cmpt, pend);
 	if (!pend) {
 		/* SW work around where next interrupt could be missed when
 		 * there are no entries as of now

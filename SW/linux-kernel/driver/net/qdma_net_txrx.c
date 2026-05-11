@@ -270,14 +270,14 @@ int qdma_net_rx_packet_cb(unsigned long q_hndl, unsigned long q_hndl_uld,
 
 	/* Set up SKB metadata */
 	skb->protocol = eth_type_trans(skb, netdev);
-	skb->ip_summed = CHECKSUM_NONE;  /* TODO: HW checksum offload */
+	skb->ip_summed = CHECKSUM_UNNECESSARY;  /* TODO: HW checksum offload */
 
 	/* Update statistics */
 	priv->stats.rx_packets++;
 	priv->stats.rx_bytes += pkt_len;
 
 	/* Pass to network stack */
-	napi_gro_receive(&rxq->napi, skb);
+	napi_gro_receive(&rxq->napi,skb);
 
 	return 0;
 }

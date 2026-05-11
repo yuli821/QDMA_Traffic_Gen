@@ -561,7 +561,7 @@ int intr_setup(struct xlnx_dma_dev *xdev)
 #ifndef USER_INTERRUPT_DISABLE
 	int intr_count = 0;
 #endif
-
+	pr_info("qdma_net: intr_setup called, drv_mode=%d (0=auto,1=poll,2=direct,3=indirect,4=legacy)\n", xdev->conf.qdma_drv_mode);
 	if ((xdev->conf.qdma_drv_mode == POLL_MODE) ||
 			(xdev->conf.qdma_drv_mode == LEGACY_INTR_MODE)) {
 		goto exit;

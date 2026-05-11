@@ -52,6 +52,9 @@ static int qdma_thread_cmpl_status_pend(struct list_head *work_item)
 	lock_descq(descq);
 	pend = !list_empty(&descq->pend_list) || !list_empty(&descq->work_list);
 	unlock_descq(descq);
+	if (descq->conf.q_type == Q_C2H) {
+		pr_info_ratelimited("qdma: C2H thread pend check: q=%s pend=%d\n", descq->conf.name, pend);
+	}
 
 	return pend;
 }
@@ -61,6 +64,9 @@ static int qdma_thread_cmpl_status_proc(struct list_head *work_item)
 	struct qdma_descq *descq;
 
 	descq = list_entry(work_item, struct qdma_descq, cmplthp_list);
+	if (descq->conf.q_type == Q_C2H) {
+		pr_info("qdma: C2H thread cmpl proc called: q=%s\n", descq->conf.name);
+	}
 	qdma_descq_service_cmpl_update(descq, 0, 1);
 	return 0;
 }

@@ -543,11 +543,13 @@ static int qdma_net_setup_rx_resources(struct qdma_net_priv *priv,
 	qconf.qidx = rxq->qid;
 	qconf.desc_rng_sz_idx = 0;
 	qconf.c2h_buf_sz_idx = 0;       /* Buffer size index */
+	qconf.cmpl_stat_en = 1;         /* Enable completion status */
+	qconf.pfetch_en = 1;            /* Enable prefetch */
 	qconf.cmpl_en_intr = 1;         /* Enable completion interrupt */
 	qconf.cmpl_trig_mode = 1;       /* Timer trigger */
 	qconf.cmpl_timer_idx = 3;
 	qconf.cmpl_cnt_th_idx = 3;
-	qconf.cmpl_desc_sz = 3;         /* 64B completion */
+	qconf.cmpl_desc_sz = 0;         /* 64B completion */
 	qconf.fp_descq_isr_top = qdma_net_napi_schedule;  /* IRQ handler */
 	qconf.quld = (unsigned long)rxq;  /* User data for callback */
 	qconf.fp_descq_c2h_packet = qdma_net_rx_packet_cb;
@@ -717,6 +719,7 @@ static void qdma_net_free_all_rx_resources(struct qdma_net_priv *priv)
  */
 static void qdma_net_napi_schedule(unsigned long q_hndl, unsigned long uld)
 {
+	pr_info("qdma_net: napi_schedule called from interrupt (q_hndl=0x%lx)\n", q_hndl);
 	struct qdma_net_queue *q = (struct qdma_net_queue *)uld;
 
 	if (likely(q && q->priv && q->priv->ndev))
@@ -732,6 +735,7 @@ static void qdma_net_napi_schedule(unsigned long q_hndl, unsigned long uld)
  */
 static int qdma_net_napi_poll(struct napi_struct *napi, int budget)
 {
+	pr_info("qdma_net: napi_poll called, budget=%d\n", budget);
 	struct qdma_net_queue *q = container_of(napi, struct qdma_net_queue, napi);
 	struct qdma_net_priv *priv = q->priv;
 	int work_done;
@@ -739,6 +743,9 @@ static int qdma_net_napi_poll(struct napi_struct *napi, int budget)
 	/* Service RX completions from QDMA */
 	work_done = qdma_queue_service(priv->xpdev->dev_hndl,
 	                                q->c2h_qhndl, budget, true);
+	pr_info("qdma_net: napi_poll done, work_done=%d\n", work_done);
+	if (work_done < 0)
+        work_done = 0;
 
 	if (work_done < budget) {
 		napi_complete_done(napi, work_done);
@@ -807,7 +814,8 @@ static void qdma_net_watchdog_task(struct work_struct *work)
 
 	qdma_net_update_stats(priv);
 	qdma_net_check_link(priv);
-
+	for (int i = 0; i < priv->num_rxq; i++)
+        napi_schedule(&priv->qs[i].napi);
 	/* Reschedule watchdog every 2 seconds */
 	schedule_delayed_work(&priv->watchdog_task, 2 * HZ);
 }
