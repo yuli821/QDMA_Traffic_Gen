@@ -174,7 +174,7 @@ int main(int argc, char* argv[]) {
     PciWrite(user_bar_idx, FLOW0_CONFIG_BASE+4, 8, port); //Flow0 cycles per pkt
     PciWrite(user_bar_idx, FLOW0_CONFIG_BASE+8, 0, port); //Flow0 traffic pattern, not used by now
     PciWrite(user_bar_idx, FLOW0_CONFIG_BASE+12, 0x0A000001, port); //Flow0 src ip address:10.0.0.1
-    PciWrite(user_bar_idx, FLOW0_CONFIG_BASE+16, 1000, port); //Flow0 src port:1000
+    PciWrite(user_bar_idx, FLOW0_CONFIG_BASE+16, 1005, port); //Flow0 src port:1000
     PciWrite(user_bar_idx, FLOW0_CONFIG_BASE+20, 0x0AABBCCDD, port); //Flow0 src mac low address:AA:BB:CC:DD
     PciWrite(user_bar_idx, FLOW0_CONFIG_BASE+24, 0x0011, port); //Flow0 src mac high address:00:11
     //Flow1
@@ -182,7 +182,7 @@ int main(int argc, char* argv[]) {
     PciWrite(user_bar_idx, FLOW1_CONFIG_BASE+4, 2, port); //Flow1 cycles per pkt
     PciWrite(user_bar_idx, FLOW1_CONFIG_BASE+8, 0, port); //Flow1 traffic pattern, not used by now
     PciWrite(user_bar_idx, FLOW1_CONFIG_BASE+12, 0x0A000002, port); //Flow1 src ip address:10.0.0.2
-    PciWrite(user_bar_idx, FLOW1_CONFIG_BASE+16, 1001, port); //Flow1 src port:1001
+    PciWrite(user_bar_idx, FLOW1_CONFIG_BASE+16, 1000, port); //Flow1 src port:1001
     PciWrite(user_bar_idx, FLOW1_CONFIG_BASE+20, 0xAABBCCDE, port); //Flow1 src mac low address:AA:BB:CC:DE
     PciWrite(user_bar_idx, FLOW1_CONFIG_BASE+24, 0x0011, port); //Flow1 src mac high address:00:11
 
@@ -204,9 +204,9 @@ int main(int argc, char* argv[]) {
     sleep(1);
     /* Start the C2H Engine */
     // PciWrite(user_bar_idx, C2H_ST_QID_REG, qbase, port);
-    // reg_val = PciRead(user_bar_idx, C2H_CONTROL_REG, port);
-    // reg_val |= ST_C2H_START_VAL;
-    // PciWrite(user_bar_idx, C2H_CONTROL_REG, reg_val, port);
+    reg_val = PciRead(user_bar_idx, C2H_CONTROL_REG, port);
+    reg_val |= ST_C2H_START_VAL;
+    PciWrite(user_bar_idx, C2H_CONTROL_REG, reg_val, port);
     PciWrite(user_bar_idx, FLOW_RUNNING_VEC, 0x3, port); //Flow0 and Flow1 running
 
     prev_tsc = rte_rdtsc_precise();
@@ -241,10 +241,10 @@ int main(int argc, char* argv[]) {
     }
 
     /* Stop the C2H Engine */
-    // reg_val = PciRead(user_bar_idx, C2H_CONTROL_REG, port); 
-    // reg_val |= ST_C2H_END_VAL;
-    // PciWrite(user_bar_idx, C2H_CONTROL_REG, reg_val,port);
     PciWrite(user_bar_idx, FLOW_RUNNING_VEC, 0x0, port); //Flow0 and Flow1 stopped
+    reg_val = PciRead(user_bar_idx, C2H_CONTROL_REG, port); 
+    reg_val |= ST_C2H_END_VAL;
+    PciWrite(user_bar_idx, C2H_CONTROL_REG, reg_val,port);
 
     printf("DMA received number of packets: %ld\n",number_pkts_prev);
     //rte_spinlock_unlock(&pinfo[port].port_update_lock);

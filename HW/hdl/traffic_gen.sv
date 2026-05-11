@@ -29,7 +29,9 @@ module traffic_gen #(
 localparam BYTES_PER_BEAT = RX_LEN / 8;
 localparam [1:0] IDLE = 2'b00, TRANSFER = 2'b01, WAIT = 2'b10;
 
-logic [1:0] state;
+logic [1:0] curr_state;
+logic [1:0] next_state;
+
 logic [31:0] wait_counter;
 logic [15:0] trans_counter;
 logic is_header;
@@ -63,66 +65,82 @@ always_comb begin
 end
 
 assign m_axis_tdata = data_buf;
-assign m_axis_tvalid = (state == TRANSFER) && flow_running;
+assign m_axis_tvalid = (curr_state == TRANSFER);
 assign m_axis_tlast = m_axis_tvalid && (trans_counter >= (config_in.pkt_size - BYTES_PER_BEAT));
 
 // State machine
-always_ff @(posedge axi_aclk) begin
-    if (~axi_aresetn) begin
-        state <= IDLE;
+logic [31:0] cycles_pkt;
+logic [31:0] cycles_needed;
+assign cycles_needed = config_in.pkt_size[15:6] +| config_in.pkt_size[5:0] + 1; //pkt size must > 64 bytes
+//next_state logic
+always_comb begin 
+    next_state = IDLE;
+    case(curr_state) 
+        IDLE: begin 
+            if (m_axis_tready && flow_running) begin 
+                next_state = TRANSFER;
+            end else begin 
+                next_state = IDLE;
+            end
+        end
+        TRANSFER: begin 
+            if (m_axis_tready && trans_counter >= (config_in.pkt_size - BYTES_PER_BEAT)) begin
+                next_state = WAIT;
+            end else begin 
+                next_state = TRANSFER;
+            end
+        end
+        WAIT: begin 
+            if (flow_running) begin 
+                if (m_axis_tready && (wait_counter >= cycles_pkt-1)) begin //check credit
+                    next_state = TRANSFER;
+                end else begin 
+                    next_state = WAIT;
+                end
+            end else begin 
+                next_state = IDLE;
+            end
+        end
+        endcase
+end
+always_ff @(posedge axi_aclk) begin 
+    if (~axi_aresetn) begin 
+        curr_state <= IDLE;
         wait_counter <= 0;
         trans_counter <= 0;
-        is_header <= 1;
-    end else if (~flow_running) begin
-        // Graceful stop - wait for current packet to finish
-        if (state == WAIT || state == IDLE) begin
-            state <= IDLE;
-            wait_counter <= 0;
-            trans_counter <= 0;
-            is_header <= 1;
-        end else if (state == TRANSFER && m_axis_tready && m_axis_tlast) begin
-            state <= IDLE;
-            wait_counter <= 0;
-            trans_counter <= 0;
-            is_header <= 1;
-        end
-    end else begin
-        case (state)
-            IDLE: begin
+        is_header <= 1'b1;
+        cycles_pkt <= config_in.cycles_per_pkt;
+    end else begin 
+        curr_state <= next_state;
+        case(curr_state)
+            IDLE: begin 
+                cycles_pkt <= (config_in.cycles_per_pkt > cycles_needed) ? config_in.cycles_per_pkt : cycles_needed;
                 wait_counter <= 0;
                 trans_counter <= 0;
-                is_header <= 1;
-                state <= TRANSFER;  // Start immediately when running
+                is_header <= 1'b1;
             end
-            
             TRANSFER: begin
-                if (m_axis_tready) begin  // Only advance when FIFO accepts
+                if (m_axis_tready) begin 
                     wait_counter <= wait_counter + 1;
-                    is_header <= 0;
+                    is_header <= 1'b0;
                     if (trans_counter >= (config_in.pkt_size - BYTES_PER_BEAT)) begin
-                        // Packet complete
                         trans_counter <= 0;
-                        is_header <= 1;
-                        state <= WAIT;
-                    end else begin
+                    end 
+                    else begin 
                         trans_counter <= trans_counter + BYTES_PER_BEAT;
                     end
-                end
-                // If !m_axis_tready, hold state (backpressure)
+                end  
             end
-            
-            WAIT: begin
-                is_header <= 1;
-                trans_counter <= 0;
-                if (wait_counter >= config_in.cycles_per_pkt) begin
-                    state <= TRANSFER;  // Start next packet
+            WAIT: begin 
+                is_header <= 1'b1;
+                trans_counter <= 16'h0;
+                if (m_axis_tready && (wait_counter >= cycles_pkt-1)) begin //check credit
                     wait_counter <= 0;
-                end else begin
+                    cycles_pkt <= (config_in.cycles_per_pkt > cycles_needed) ? config_in.cycles_per_pkt : cycles_needed;
+                end else begin 
                     wait_counter <= wait_counter + 1;
                 end
             end
-            
-            default: state <= IDLE;
         endcase
     end
 end

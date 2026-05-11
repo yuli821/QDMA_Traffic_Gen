@@ -252,8 +252,9 @@ int qdma_net_rx_packet_cb(unsigned long q_hndl, unsigned long q_hndl_uld,
 	if (!skb) {
 		pr_err("qdma_net: Failed to allocate RX SKB\n");
 		priv->stats.rx_dropped++;
-		return -ENOMEM;
-	}
+		rxq->rx_work_done++;
+		return 0; /*drop, but advance the ring*/
+	} 
 
 	/* Copy data from scatter-gather list to SKB */
 	for (i = 0, sg = sgl; i < sgcnt && sg && copied < pkt_len; i++, sg = sg->next) {
@@ -278,6 +279,8 @@ int qdma_net_rx_packet_cb(unsigned long q_hndl, unsigned long q_hndl_uld,
 
 	/* Pass to network stack */
 	napi_gro_receive(&rxq->napi,skb);
+
+	rxq->rx_work_done++;
 
 	return 0;
 }

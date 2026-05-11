@@ -45,13 +45,14 @@ logic [RX_LEN-1:0] fifo_tdata [NUM_FLOWS-1:0];
 logic [NUM_FLOWS-1:0] fifo_tlast;
 logic [NUM_FLOWS-1:0] fifo_tready;  // Read enable from scheduler
 
+logic packet_complete;
+
 // ============================================
 // Generate traffic_gen and FIFO instances
 // ============================================
 genvar i;
 generate
     for (i = 0; i < NUM_FLOWS; i++) begin : gen_flows
-        
         // Traffic generator
         traffic_gen #(
             .RX_LEN(RX_LEN),
@@ -98,7 +99,6 @@ endgenerate
 // ============================================
 logic [NUM_FLOWS-1:0] current_flow;     // One-hot
 logic [NUM_FLOWS-1:0] next_flow;
-logic packet_complete;
 assign packet_complete = |(current_flow & fifo_tready & fifo_tvalid & fifo_tlast);
 // Detect if current flow has NO data
 logic current_flow_empty;
@@ -118,15 +118,25 @@ always_comb begin
     end
 end
 
+logic switch_trigger;
+assign switch_trigger = |(next_flow & fifo_tvalid) && (packet_complete || current_flow_empty);
 // Update current flow selection
 always_ff @(posedge axi_aclk) begin
     if (~axi_aresetn) begin
         current_flow <= {{(NUM_FLOWS-1){1'b0}}, 1'b1};
     end else begin
-        if (|(next_flow & fifo_tvalid) && (packet_complete || current_flow_empty)) begin
+        if (switch_trigger) begin
             current_flow <= next_flow;
         end
     end
+end
+
+logic switch_gap;
+always_ff @(posedge axi_aclk) begin 
+    if (~axi_aresetn)
+        switch_gap <= 1'b0;
+    else 
+        switch_gap <= switch_trigger;
 end
 
 // Output mux - select from current flow's FIFO (combinational)
@@ -143,7 +153,7 @@ always_comb begin
     pkt_size_comb = '0;
     for (int j = 0; j < NUM_FLOWS; j++) begin
         if (current_flow[j]) begin
-            rx_valid_comb = fifo_tvalid[j] && crdt_valid && ~qid_fifo_full;
+            rx_valid_comb = fifo_tvalid[j] && fifo_tready[j];
             rx_data_comb = fifo_tdata[j];
             rx_last_comb = fifo_tlast[j];
             hash_val_comb = gen_hash[j];
@@ -152,48 +162,18 @@ always_comb begin
     end
 end
 
-// Proper pipelined output with handshake
-logic rx_valid_reg;
-logic [RX_LEN-1:0] rx_data_reg;
-logic rx_last_reg;
-logic [31:0] hash_val_reg;
-logic output_ready;  // Can accept new data into register
-logic [15:0] pkt_size_reg;
-
-// Output register is "ready" when empty or downstream is consuming
-assign output_ready = ~rx_valid_reg || rx_ready;
-
 // FIFO read enable - only when output register can accept
 always_comb begin
     fifo_tready = '0;
     for (int j = 0; j < NUM_FLOWS; j++) begin
-        fifo_tready[j] = current_flow[j] && output_ready && crdt_valid && ~qid_fifo_full && fifo_tvalid[j];
+        fifo_tready[j] = current_flow[j] && rx_ready && crdt_valid && ~qid_fifo_full && ~switch_gap;
     end
 end
 
-// Pipeline register
-always_ff @(posedge axi_aclk) begin
-    if (~axi_aresetn) begin
-        rx_valid_reg <= 0;
-        rx_data_reg <= '0;
-        rx_last_reg <= 0;
-        hash_val_reg <= '0;
-        pkt_size_reg <= '0;
-    end else begin
-        if (output_ready) begin
-            rx_valid_reg <= rx_valid_comb && |(fifo_tready);  // Only valid if actually reading
-            rx_data_reg <= rx_data_comb;
-            rx_last_reg <= rx_last_comb;
-            hash_val_reg <= hash_val_comb;
-            pkt_size_reg <= pkt_size_comb;
-        end
-    end
-end
-
-assign rx_valid = rx_valid_reg;
-assign rx_data = rx_data_reg;
-assign rx_last = rx_last_reg;
-assign hash_val = hash_val_reg;
-assign pkt_size = pkt_size_reg;
+assign rx_valid = rx_valid_comb;
+assign rx_data = rx_data_comb;
+assign rx_last = rx_last_comb;
+assign hash_val = hash_val_comb;
+assign pkt_size = pkt_size_comb;
 
 endmodule
